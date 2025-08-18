@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Downloader</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <i class="fab fa-youtube"></i>
+                <h1>YouTube Downloader</h1>
+            </div>
+            <p class="subtitle">Download YouTube videos easily and quickly</p>
+        </header>
+
+        <main class="main-content">
+            <div class="input-section">
+                <div class="url-input-container">
+                    <input type="text" id="videoUrl" placeholder="Enter YouTube video URL here..." class="url-input">
+                    <button id="analyzeBtn" class="analyze-btn">
+                        <i class="fas fa-search"></i>
+                        Analyze
+                    </button>
+                </div>
+                <div class="examples">
+                    <p>Examples:</p>
+                    <ul>
+                        <li>https://www.youtube.com/watch?v=dQw4w9WgXcQ</li>
+                        <li>https://youtu.be/dQw4w9WgXcQ</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div id="loadingSection" class="loading-section hidden">
+                <div class="spinner"></div>
+                <p>Analyzing video...</p>
+            </div>
+
+            <div id="errorSection" class="error-section hidden">
+                <div class="error-content">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p id="errorMessage"></p>
+                </div>
+            </div>
+
+            <div id="videoInfoSection" class="video-info-section hidden">
+                <div class="video-preview">
+                    <div class="thumbnail-container">
+                        <img id="videoThumbnail" src="" alt="Video thumbnail">
+                        <div class="video-overlay">
+                            <i class="fab fa-youtube"></i>
+                        </div>
+                    </div>
+                    <div class="video-details">
+                        <h3 id="videoTitle"></h3>
+                        <div class="video-meta">
+                            <span id="videoDuration"></span>
+                            <span id="videoId"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="download-options">
+                    <h4>Select Quality:</h4>
+                    <div id="formatOptions" class="format-options">
+                        <!-- Format options will be populated here -->
+                    </div>
+                </div>
+
+                <div class="download-section">
+                    <button id="downloadBtn" class="download-btn" disabled>
+                        <i class="fas fa-download"></i>
+                        Download Video
+                    </button>
+                </div>
+            </div>
+
+            <div id="downloadProgress" class="download-progress hidden">
+                <div class="progress-content">
+                    <div class="spinner"></div>
+                    <p>Downloading video...</p>
+                    <p class="progress-text">This may take a few minutes depending on the video size.</p>
+                </div>
+            </div>
+
+            <div id="downloadComplete" class="download-complete hidden">
+                <div class="complete-content">
+                    <i class="fas fa-check-circle"></i>
+                    <h3>Download Complete!</h3>
+                    <p id="downloadFileName"></p>
+                    <div class="download-actions">
+                        <button id="downloadFileBtn" class="download-file-btn">
+                            <i class="fas fa-download"></i>
+                            Download File
+                        </button>
+                        <button id="newDownloadBtn" class="new-download-btn">
+                            <i class="fas fa-plus"></i>
+                            Download Another
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2024 YouTube Downloader. For educational purposes only.</p>
+            <p>Please respect YouTube's terms of service and copyright laws.</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html> 
