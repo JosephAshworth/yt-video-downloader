@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 from urllib.parse import urlparse, parse_qs
+import subprocess
 
 app = Flask(__name__)
 
@@ -31,6 +32,39 @@ def extract_video_id(url):
     elif parsed_url.hostname == 'youtu.be':
         return parsed_url.path[1:]
     return None
+
+def convert_mp4_to_mov(input_file):
+    """Convert MP4 file to MOV format using FFmpeg"""
+    try:
+        # Create output filename
+        output_file = input_file.replace('.mp4', '.mov')
+        
+        # FFmpeg command to convert MP4 to MOV (preserves quality)
+        cmd = [
+            'ffmpeg', '-i', input_file, 
+            '-c', 'copy',  # Copy streams without re-encoding (preserves quality)
+            '-f', 'mov',   # Force MOV format
+            output_file
+        ]
+        
+        print(f"[Conversion] Converting {input_file} to {output_file}...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # Remove the original MP4 file
+            os.remove(input_file)
+            print(f"[Conversion] Successfully converted to {output_file}")
+            return output_file
+        else:
+            print(f"[Conversion] FFmpeg conversion failed: {result.stderr}")
+            return input_file  # Return original file if conversion fails
+            
+    except FileNotFoundError:
+        print("[Conversion] FFmpeg not found - keeping original MP4 file")
+        return input_file
+    except Exception as e:
+        print(f"[Conversion] Conversion error: {str(e)}")
+        return input_file
 
 @app.route('/')
 def index():
@@ -164,17 +198,30 @@ def download_video():
         
         # Configure yt-dlp options for download
         ydl_opts = {
-            'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, fallback to best
-            'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(height)sp_%(format_id)s.%(ext)s'),
+            'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
+            'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(format_id)s.mp4'),  # Output as MP4
             'quiet': False,  # Show more output for debugging
             'no_warnings': False,  # Show warnings
-            'merge_output_format': 'mp4',
+            'merge_output_format': 'mp4',  # Force MP4 output
             'skip': ['storyboard', 'image'],
             'extractaudio': False,
             'audioformat': None,
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'verbose': True,  # Add verbose output for debugging
+            # Add options to handle 403 errors
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'retries': 3,  # Retry failed downloads
+            'fragment_retries': 3,  # Retry fragment downloads
+            'http_chunk_size': 10485760,  # 10MB chunks
+            'sleep_interval': 1,  # Sleep between requests
+            'max_sleep_interval': 5,  # Maximum sleep interval
+            # Better format handling
+            'prefer_ffmpeg': True,  # Use FFmpeg for better merging
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',  # Ensure proper MP4 output
+            }],
         }
         
         print(f"[Download] Using format_id: {format_id}")
@@ -186,38 +233,92 @@ def download_video():
             print(f"Video title: {info.get('title', 'Unknown')}")
             print(f"Available formats: {len(info.get('formats', []))}")
             
-            # Download the video
+            # Download the video with the selected format
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
+            print(f"[Download] Expected filename: {filename}")
+            print(f"[Download] Selected format_id: {format_id}")
+            
+            # Verify the downloaded format matches what was requested
+            downloaded_info = ydl.extract_info(url, download=False)
+            selected_format = None
+            for f in downloaded_info.get('formats', []):
+                if f.get('format_id') == format_id:
+                    selected_format = f
+                    break
+            
+            if selected_format:
+                print(f"[Download] Selected format details: {selected_format.get('height')}p, {selected_format.get('ext')}, {selected_format.get('format_note', '')}")
+                print(f"[Download] Selected format bitrate: {selected_format.get('tbr', 'Unknown')} kbps")
+                print(f"[Download] Selected format filesize: {selected_format.get('filesize', 'Unknown')} bytes")
+            else:
+                print(f"[Download] WARNING: Could not find format_id {format_id} in available formats")
+            
             # Check if the downloaded file is actually a video
             if os.path.exists(filename):
-                # Verify it's not a storyboard by checking file size and extension
                 file_size = os.path.getsize(filename)
                 file_ext = os.path.splitext(filename)[1].lower()
                 
-                print(f"Downloaded file: {filename}, size: {file_size}, ext: {file_ext}")  # Debug print
+                print(f"Downloaded file: {filename}, size: {file_size}, ext: {file_ext}")
+                print(f"[Download] File size comparison: Downloaded={file_size}, Expected={selected_format.get('filesize', 'Unknown') if selected_format else 'Unknown'}")
                 
                 # Check for invalid file types
                 invalid_extensions = ['.mhtml', '.html', '.htm', '.jpg', '.png', '.webp', '.gif']
                 if file_ext in invalid_extensions:
-                    os.remove(filename)  # Remove the invalid file
+                    os.remove(filename)
                     return jsonify({'error': f'Downloaded file is {file_ext.upper()}, not a video. Please try a different quality option.'}), 500
                 
                 # If file is too small, it might be invalid
                 if file_size < 1000000:  # Less than 1MB
-                    os.remove(filename)  # Remove the small file
+                    os.remove(filename)
                     return jsonify({'error': 'Downloaded file is too small to be a valid video. Please try a different quality option.'}), 500
+                
+                # Check if file size is much smaller than expected (quality issue)
+                if selected_format and selected_format.get('filesize'):
+                    expected_size = selected_format.get('filesize')
+                    size_ratio = file_size / expected_size
+                    print(f"[Download] Size ratio: Downloaded/Expected = {size_ratio:.2f}")
+                    if size_ratio < 0.5:  # If downloaded file is less than 50% of expected size
+                        print(f"[Download] WARNING: Downloaded file is much smaller than expected - quality may be compromised")
                 
                 return jsonify({
                     'success': True,
                     'filename': os.path.basename(filename),
                     'filepath': filename,
                     'title': info.get('title', 'Unknown Title'),
-                    'filesize': file_size
+                    'filesize': file_size,
+                    'selected_quality': f"{selected_format.get('height', 'Unknown')}p" if selected_format else 'Unknown',
+                    'expected_size': selected_format.get('filesize', 'Unknown') if selected_format else 'Unknown'
                 })
             else:
-                return jsonify({'error': 'Download failed - file not found'}), 500
+                # Try fallback download with simpler format
+                print(f"[Download] First attempt failed, trying fallback download...")
+                fallback_opts = {
+                    'format': 'best[ext=mp4]/best',  # Simpler format selection
+                    'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_fallback.mp4'),
+                    'quiet': False,
+                    'verbose': True,
+                }
+                
+                with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
+                    fallback_info = fallback_ydl.extract_info(url, download=True)
+                    fallback_filename = fallback_ydl.prepare_filename(fallback_info)
+                    
+                    if os.path.exists(fallback_filename):
+                        file_size = os.path.getsize(fallback_filename)
+                        print(f"[Download] Fallback successful: {fallback_filename}, size: {file_size}")
+                        return jsonify({
+                            'success': True,
+                            'filename': os.path.basename(fallback_filename),
+                            'filepath': fallback_filename,
+                            'title': info.get('title', 'Unknown Title'),
+                            'filesize': file_size,
+                            'selected_quality': 'Fallback quality (best available)',
+                            'expected_size': 'Unknown'
+                        })
+                    else:
+                        return jsonify({'error': 'Both download attempts failed'}), 500
                 
     except Exception as e:
         print(f"Error in download_video: {str(e)}")  # Debug print
@@ -338,7 +439,8 @@ def test_download():
         # Simple format selection
         ydl_opts = {
             'format': format_id,
-            'outtmpl': os.path.join(UPLOAD_FOLDER, 'test_%(title)s_%(format_id)s.%(ext)s'),
+            'outtmpl': os.path.join(UPLOAD_FOLDER, 'test_%(title)s_%(format_id)s.mov'),
+            'merge_output_format': 'mov',
             'quiet': False,
             'no_warnings': False,
         }
@@ -363,6 +465,76 @@ def test_download():
     except Exception as e:
         print(f"Error in test_download: {str(e)}")
         return jsonify({'error': f'Test download error: {str(e)}'}), 500
+
+@app.route('/test_format', methods=['POST'])
+def test_format():
+    """Test route to download with a specific format and show detailed information"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        format_id = data.get('format_id', 'best')
+        
+        if not url:
+            return jsonify({'error': 'Please provide a YouTube URL'}), 400
+        
+        print(f"[Test Format] Testing format_id: {format_id}")
+        
+        # First, get format info
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            # Find the specific format
+            target_format = None
+            for f in info.get('formats', []):
+                if f.get('format_id') == format_id:
+                    target_format = f
+                    break
+            
+            if not target_format:
+                return jsonify({'error': f'Format {format_id} not found'})
+            
+            print(f"[Test Format] Found format: {target_format.get('height')}p, {target_format.get('ext')}, {target_format.get('format_note', '')}")
+            print(f"[Test Format] Bitrate: {target_format.get('tbr', 'Unknown')} kbps")
+            print(f"[Test Format] Filesize: {target_format.get('filesize', 'Unknown')} bytes")
+            print(f"[Test Format] Codec: {target_format.get('vcodec', 'Unknown')}")
+            
+            # Try to download just this format
+            test_ydl_opts = {
+                'format': format_id,
+                'outtmpl': os.path.join(UPLOAD_FOLDER, 'test_%(title)s_%(format_id)s.%(ext)s'),
+                'quiet': False,
+                'verbose': True,
+            }
+            
+            with yt_dlp.YoutubeDL(test_ydl_opts) as test_ydl:
+                test_info = test_ydl.extract_info(url, download=True)
+                test_filename = test_ydl.prepare_filename(test_info)
+                
+                if os.path.exists(test_filename):
+                    file_size = os.path.getsize(test_filename)
+                    return jsonify({
+                        'success': True,
+                        'filename': os.path.basename(test_filename),
+                        'filesize': file_size,
+                        'format_info': {
+                            'height': target_format.get('height'),
+                            'ext': target_format.get('ext'),
+                            'bitrate': target_format.get('tbr'),
+                            'expected_size': target_format.get('filesize'),
+                            'codec': target_format.get('vcodec')
+                        }
+                    })
+                else:
+                    return jsonify({'error': 'Test download failed'})
+                    
+    except Exception as e:
+        print(f"Error in test_format: {str(e)}")
+        return jsonify({'error': f'Test format error: {str(e)}'}), 500
 
 @app.route('/debug_formats', methods=['POST'])
 def debug_formats():
@@ -393,18 +565,32 @@ def debug_formats():
                     'vcodec': f.get('vcodec', ''),
                     'acodec': f.get('acodec', ''),
                     'protocol': f.get('protocol', ''),
-                    'url': f.get('url', '')[:100] + '...' if f.get('url') else ''
+                    'url': f.get('url', '')[:100] + '...' if f.get('url') else '',
+                    'is_video_only': f.get('acodec') == 'none' or not f.get('acodec'),
+                    'tbr': f.get('tbr', 0),
+                    'fps': f.get('fps', 0)
                 })
+            
+            # Sort by height for easier reading
+            all_formats.sort(key=lambda x: x['height'], reverse=True)
             
             return jsonify({
                 'title': info.get('title', 'Unknown'),
                 'formats': all_formats,
-                'total_formats': len(all_formats)
+                'total_formats': len(all_formats),
+                'video_id': extract_video_id(url)
             })
             
     except Exception as e:
         return jsonify({'error': f'Debug error: {str(e)}'}), 500
 
 if __name__ == '__main__':
+    # Use environment variables for production deployment
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, host='0.0.0.0', port=port) 
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    
+    app.run(
+        debug=debug,
+        host='0.0.0.0',  # Allow external connections
+        port=port
+    ) 
