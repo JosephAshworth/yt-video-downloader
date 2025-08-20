@@ -3,6 +3,8 @@ import yt_dlp
 import os
 import re
 import tempfile
+import random
+import time
 from urllib.parse import urlparse, parse_qs
 import subprocess
 
@@ -32,6 +34,62 @@ def extract_video_id(url):
     elif parsed_url.hostname == 'youtu.be':
         return parsed_url.path[1:]
     return None
+
+def get_random_user_agent():
+    """Get a random user agent to avoid detection"""
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0',
+    ]
+    return random.choice(user_agents)
+
+def get_headers_for_user_agent(user_agent):
+    """Get appropriate headers for a given user agent"""
+    if 'Chrome' in user_agent:
+        return {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+        }
+    elif 'Firefox' in user_agent:
+        return {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+        }
+    else:  # Safari/Edge fallback
+        return {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
 
 def convert_mp4_to_mov(input_file):
     """Convert MP4 file to MOV format using FFmpeg"""
@@ -75,6 +133,20 @@ def test():
         'timestamp': '2024-01-18'
     })
 
+@app.route('/test_bot_avoidance')
+def test_bot_avoidance():
+    """Test route to check bot avoidance techniques"""
+    user_agent = get_random_user_agent()
+    headers = get_headers_for_user_agent(user_agent)
+    
+    return jsonify({
+        'status': 'ok',
+        'message': 'Bot avoidance test',
+        'user_agent': user_agent,
+        'headers': headers,
+        'timestamp': '2024-01-18'
+    })
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -91,17 +163,56 @@ def get_video_info():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Configure yt-dlp options for info extraction
+        # Configure yt-dlp options for info extraction with bot avoidance
+        user_agent = get_random_user_agent()
+        headers = get_headers_for_user_agent(user_agent)
+        
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            # Bot avoidance for info extraction
+            'user_agent': user_agent,
+            'http_headers': headers,
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'retries': 5,
+            'fragment_retries': 5,
+            'sleep_interval': 2,
+            'max_sleep_interval': 8,
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            # Get available formats and filter for actual video formats (allow video-only for higher qualities)
+        # Retry mechanism with exponential backoff for bot detection
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    break  # Success, exit retry loop
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'bot' in error_msg or 'sign in' in error_msg or '403' in error_msg:
+                    print(f"[Bot Detection] Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < max_retries - 1:
+                        print(f"[Bot Detection] Waiting {retry_delay} seconds before retry...")
+                        time.sleep(retry_delay)
+                        # Rotate user agent for next attempt
+                        user_agent = get_random_user_agent()
+                        headers = get_headers_for_user_agent(user_agent)
+                        ydl_opts['user_agent'] = user_agent
+                        ydl_opts['http_headers'] = headers
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"[Bot Detection] All retry attempts failed")
+                        return jsonify({'error': 'YouTube is blocking automated access. Please try again later or use a different video.'}), 429
+                else:
+                    # Non-bot related error, don't retry
+                    raise e
+        
+        # Get available formats and filter for actual video formats (allow video-only for higher qualities)
             formats = []
             for f in info.get('formats', []):
                 # Include all video formats (both with and without audio)
@@ -205,7 +316,10 @@ def download_video():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Configure yt-dlp options for download
+        # Configure yt-dlp options for download with advanced bot avoidance
+        user_agent = get_random_user_agent()
+        headers = get_headers_for_user_agent(user_agent)
+        
         ydl_opts = {
             'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
             'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(format_id)s.mp4'),  # Output as MP4
@@ -218,23 +332,23 @@ def download_video():
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'verbose': True,  # Add verbose output for debugging
-            # Add options to handle 403 errors and bot detection
-            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Accept-Encoding': 'gzip,deflate',
-                'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            },
-            'retries': 3,  # Retry failed downloads
-            'fragment_retries': 3,  # Retry fragment downloads
+            
+            # Advanced bot avoidance techniques
+            'user_agent': user_agent,
+            'http_headers': headers,
+            
+            # Enhanced retry and delay settings
+            'retries': 10,  # More retries for bot detection
+            'fragment_retries': 10,  # More fragment retries
             'http_chunk_size': 10485760,  # 10MB chunks
-            'sleep_interval': 1,  # Sleep between requests
-            'max_sleep_interval': 5,  # Maximum sleep interval
+            'sleep_interval': 3,  # Longer sleep between requests
+            'max_sleep_interval': 10,  # Maximum sleep interval
+            'sleep_interval_requests': 2,  # Sleep between requests
+            
+            # Additional bot avoidance
+            'socket_timeout': 30,  # Longer socket timeout
+            'extractor_retries': 5,  # Retry extractor failures
+            
             # Better format handling
             'prefer_ffmpeg': True,  # Use FFmpeg for better merging
             'postprocessors': [{
@@ -246,15 +360,42 @@ def download_video():
         print(f"[Download] Using format_id: {format_id}")
         print(f"[Download] Full format string: {format_id}+bestaudio/best")
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # First, extract info to validate the format
-            info = ydl.extract_info(url, download=False)
-            print(f"Video title: {info.get('title', 'Unknown')}")
-            print(f"Available formats: {len(info.get('formats', []))}")
-            
-            # Download the video with the selected format
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
+        # Retry mechanism with exponential backoff for bot detection during download
+        max_retries = 3
+        retry_delay = 3
+        
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # First, extract info to validate the format
+                    info = ydl.extract_info(url, download=False)
+                    print(f"Video title: {info.get('title', 'Unknown')}")
+                    print(f"Available formats: {len(info.get('formats', []))}")
+                    
+                    # Download the video with the selected format
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    break  # Success, exit retry loop
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'bot' in error_msg or 'sign in' in error_msg or '403' in error_msg:
+                    print(f"[Download Bot Detection] Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < max_retries - 1:
+                        print(f"[Download Bot Detection] Waiting {retry_delay} seconds before retry...")
+                        time.sleep(retry_delay)
+                        # Rotate user agent for next attempt
+                        user_agent = get_random_user_agent()
+                        headers = get_headers_for_user_agent(user_agent)
+                        ydl_opts['user_agent'] = user_agent
+                        ydl_opts['http_headers'] = headers
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"[Download Bot Detection] All retry attempts failed")
+                        return jsonify({'error': 'YouTube is blocking downloads. Please try again later or use a different video.'}), 429
+                else:
+                    # Non-bot related error, don't retry
+                    raise e
             
             print(f"[Download] Expected filename: {filename}")
             print(f"[Download] Selected format_id: {format_id}")
