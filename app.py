@@ -66,6 +66,15 @@ def convert_mp4_to_mov(input_file):
         print(f"[Conversion] Conversion error: {str(e)}")
         return input_file
 
+@app.route('/test')
+def test():
+    """Test route to check if the app is working"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'YouTube Downloader is running',
+        'timestamp': '2024-01-18'
+    })
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -209,8 +218,18 @@ def download_video():
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'verbose': True,  # Add verbose output for debugging
-            # Add options to handle 403 errors
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            # Add options to handle 403 errors and bot detection
+            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Accept-Encoding': 'gzip,deflate',
+                'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            },
             'retries': 3,  # Retry failed downloads
             'fragment_retries': 3,  # Retry fragment downloads
             'http_chunk_size': 10485760,  # 10MB chunks
