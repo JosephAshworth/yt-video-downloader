@@ -1,17 +1,152 @@
-from flask import Flask, render_template, request, jsonify, send_file
-import yt_dlp
 import os
-import re
-import tempfile
-from urllib.parse import urlparse, parse_qs
-import subprocess
+import json
+import time
+import random
+import requests
+from flask import Flask, request, jsonify, send_file, render_template
+import yt_dlp
+from datetime import datetime, timedelta
+import hashlib
+import pickle
 
 app = Flask(__name__)
 
-# Configure upload folder
+# Configuration
 UPLOAD_FOLDER = 'downloads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# Session storage for persistent cookies and user agents
+SESSIONS_FILE = 'youtube_sessions.pkl'
+USER_AGENTS_FILE = 'user_agents.pkl'
+
+# Load or create persistent sessions
+def load_sessions():
+    """Load persistent YouTube sessions to simulate local browser behavior"""
+    try:
+        if os.path.exists(SESSIONS_FILE):
+            with open(SESSIONS_FILE, 'rb') as f:
+                return pickle.load(f)
+    except Exception as e:
+        print(f"Error loading sessions: {e}")
+    
+    # Create new session with realistic browser data
+    return {
+        'cookies': {},
+        'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'last_request': None,
+        'request_count': 0,
+        'session_id': hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+    }
+
+def save_sessions(sessions):
+    """Save persistent YouTube sessions"""
+    try:
+        with open(SESSIONS_FILE, 'wb') as f:
+            pickle.dump(sessions, f)
+    except Exception as e:
+        print(f"Error saving sessions: {e}")
+
+def load_user_agents():
+    """Load realistic user agents that work locally"""
+    try:
+        if os.path.exists(USER_AGENTS_FILE):
+            with open(USER_AGENTS_FILE, 'rb') as f:
+                return pickle.load(f)
+    except Exception as e:
+        print(f"Error loading user agents: {e}")
+    
+    # Realistic user agents that work locally
+    return [
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    ]
+
+def save_user_agents(user_agents):
+    """Save user agents"""
+    try:
+        with open(USER_AGENTS_FILE, 'wb') as f:
+            pickle.dump(user_agents, f)
+    except Exception as e:
+        print(f"Error saving user agents: {e}")
+
+def simulate_human_behavior():
+    """Simulate human-like behavior patterns"""
+    # Random delay between requests (like human browsing)
+    time.sleep(random.uniform(1, 3))
+    
+    # Random mouse movement simulation
+    mouse_x = random.randint(100, 800)
+    mouse_y = random.randint(100, 600)
+    
+    return {
+        'mouse_x': mouse_x,
+        'mouse_y': mouse_y,
+        'timestamp': time.time()
+    }
+
+def get_realistic_headers(sessions):
+    """Get headers that exactly match local browser behavior"""
+    user_agent = sessions['user_agent']
+    
+    # Headers that work locally
+    headers = {
+        'User-Agent': user_agent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"',
+        'sec-ch-ua-platform-version': '"13.0.0"',
+        'sec-ch-ua-model': '""',
+        'sec-ch-ua-arch': '"x86"',
+        'sec-ch-ua-bitness': '"64"',
+        'sec-ch-ua-full-version': '"120.0.6099.129"',
+        'sec-ch-ua-full-version-list': '"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.129", "Google Chrome";v="120.0.6099.129"',
+        'sec-ch-ua-wow64': '?0'
+    }
+    
+    # Add referer if we have previous requests
+    if sessions.get('last_request'):
+        headers['Referer'] = sessions['last_request']
+    
+    return headers
+
+def create_local_like_session():
+    """Create a session that behaves exactly like local browser"""
+    sessions = load_sessions()
+    user_agents = load_user_agents()
+    
+    # Use the same user agent consistently (like local browser)
+    if not sessions.get('user_agent') or random.random() < 0.1:  # 10% chance to rotate
+        sessions['user_agent'] = random.choice(user_agents)
+        save_sessions(sessions)
+    
+    # Simulate human behavior
+    behavior = simulate_human_behavior()
+    
+    # Update session
+    sessions['last_request'] = 'https://www.youtube.com/'
+    sessions['request_count'] += 1
+    sessions['last_behavior'] = behavior
+    
+    save_sessions(sessions)
+    return sessions
+
+# Initialize global sessions
+GLOBAL_SESSIONS = create_local_like_session()
 
 def is_valid_youtube_url(url):
     """Check if the URL is a valid YouTube URL"""
@@ -72,7 +207,7 @@ def index():
 
 @app.route('/get_video_info', methods=['POST'])
 def get_video_info():
-    """Extract video information from YouTube URL"""
+    """Extract video information from YouTube URL using local-like behavior"""
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
@@ -80,353 +215,181 @@ def get_video_info():
         if not url or not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Try multiple extraction methods to bypass authentication
-        print(f"[INFO] Attempting to extract video info from: {url}")
+        # Use local-like session (same as what works locally)
+        sessions = create_local_like_session()
+        print(f"[LOCAL MODE] Using session ID: {sessions['session_id']}")
+        print(f"[LOCAL MODE] User Agent: {sessions['user_agent']}")
+        print(f"[LOCAL MODE] Request count: {sessions['request_count']}")
         
-        # Method 1: Try with aggressive authentication bypass
+        # Method 1: Local-like approach (replicates exact local behavior)
         try:
-            print(f"[INFO] Method 1: Aggressive authentication bypass...")
+            print(f"[LOCAL MODE] Method 1: Local browser simulation...")
             ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
+                'quiet': False,  # Show output like local
+                'no_warnings': False,  # Show warnings like local
                 'extract_flat': False,
-                # Aggressive authentication bypass
-                'nocheckcertificate': True,
-                'no_check_certificate': True,
+                # Use exact same settings that work locally
+                'nocheckcertificate': False,  # Don't skip certs like local
+                'no_check_certificate': False,
                 'ignoreerrors': False,
-                'extractor_retries': 5,
-                'retries': 5,
-                'fragment_retries': 5,
-                'http_chunk_size': 10485760,
-                'sleep_interval': 3,
-                'max_sleep_interval': 15,
-                # Multiple user agents to try
-                'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Referer': 'https://www.youtube.com/',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Cache-Control': 'max-age=0',
-                    'DNT': '1',
-                    'Upgrade-Insecure-Requests': '1',
-                },
-                # Cookie and authentication bypass
+                'extractor_retries': 1,  # Minimal retries like local
+                'retries': 1,
+                'fragment_retries': 1,
+                'http_chunk_size': 1048576,  # Small chunks like local
+                'sleep_interval': 0,  # No artificial delays like local
+                'max_sleep_interval': 0,
+                # Use the exact user agent that works locally
+                'user_agent': sessions['user_agent'],
+                # Use realistic headers that work locally
+                'http_headers': get_realistic_headers(sessions),
+                # Don't use aggressive bypass - use normal approach like local
                 'cookiefile': None,
                 'cookiesfrombrowser': None,
-                # Use different extractor
+                # Use normal extractor settings like local
                 'extractor_args': {
                     'youtube': {
-                        'skip': ['dash', 'storyboard', 'image'],
-                        'player_client': ['android', 'web'],
-                        'player_skip': ['webpage', 'configs'],
+                        'skip': ['storyboard', 'image'],  # Only skip obvious non-video
+                        'player_client': ['web'],  # Use web client like local
+                        'player_skip': [],  # Don't skip anything like local
                     }
                 },
-                # Format selection that works without auth
-                'format': 'best[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]/best',
+                # Use normal format selection like local
+                'format': 'best[ext=mp4]/best',
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
                 if info and info.get('title'):
-                    print(f"[INFO] Method 1 successful: {info.get('title')}")
+                    print(f"[LOCAL MODE] Success! Title: {info.get('title')}")
+                    # Update session with successful request
+                    sessions['last_request'] = url
+                    sessions['successful_requests'] = sessions.get('successful_requests', 0) + 1
+                    save_sessions(sessions)
                     return _process_video_info(info, url)
                     
         except Exception as e:
-            print(f"[INFO] Method 1 failed: {str(e)}")
-            print(f"[INFO] Method 1 error type: {type(e).__name__}")
-            if hasattr(e, 'exc_info'):
-                import traceback
-                print(f"[INFO] Method 1 traceback: {traceback.format_exc()}")
+            print(f"[LOCAL MODE] Method 1 failed: {str(e)}")
+            print(f"[LOCAL MODE] Error type: {type(e).__name__}")
         
-        # Method 2: Try with different extractor and mobile approach
+        # Method 2: Fallback to local browser cookies approach
         try:
-            print(f"[INFO] Method 2: Mobile extractor approach...")
+            print(f"[LOCAL MODE] Method 2: Browser cookies simulation...")
             ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
+                'quiet': False,
+                'no_warnings': False,
                 'extract_flat': False,
-                # Mobile-specific options
-                'nocheckcertificate': True,
-                'no_check_certificate': True,
+                # Use browser-like settings
+                'nocheckcertificate': False,
+                'no_check_certificate': False,
                 'ignoreerrors': False,
-                'extractor_retries': 3,
-                'retries': 3,
-                'fragment_retries': 3,
-                'http_chunk_size': 5242880,  # Smaller chunks
-                'sleep_interval': 5,
-                'max_sleep_interval': 20,
-                # Mobile user agent
-                'user_agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Referer': 'https://m.youtube.com/',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Cache-Control': 'max-age=0',
-                    'DNT': '1',
-                    'Upgrade-Insecure-Requests': '1',
-                },
+                'extractor_retries': 1,
+                'retries': 1,
+                'fragment_retries': 1,
+                'http_chunk_size': 1048576,
+                'sleep_interval': 0,
+                'max_sleep_interval': 0,
+                # Use consistent user agent
+                'user_agent': sessions['user_agent'],
+                # Use realistic headers
+                'http_headers': get_realistic_headers(sessions),
+                # Try to use browser cookies (like local)
+                'cookiesfrombrowser': ('chrome', 'firefox', 'safari'),
                 'cookiefile': None,
-                'cookiesfrombrowser': None,
-                # Try mobile YouTube
+                # Normal extractor settings
                 'extractor_args': {
                     'youtube': {
-                        'skip': ['dash', 'storyboard', 'image'],
-                        'player_client': ['android'],
-                        'player_skip': ['webpage', 'configs'],
-                        'extract_flat': False,
-                    }
-                },
-                'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                if info and info.get('title'):
-                    print(f"[INFO] Method 2 successful: {info.get('title')}")
-                    return _process_video_info(info, url)
-                    
-        except Exception as e:
-            print(f"[INFO] Method 2 failed: {str(e)}")
-            print(f"[INFO] Method 2 error type: {type(e).__name__}")
-        
-        # Method 3: Try with minimal options and different approach
-        try:
-            print(f"[INFO] Method 3: Minimal options approach...")
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': True,  # Use flat extraction
-                'nocheckcertificate': True,
-                'no_check_certificate': True,
-                'ignoreerrors': True,  # Ignore errors
-                'extractor_retries': 2,
-                'retries': 2,
-                'fragment_retries': 2,
-                'http_chunk_size': 2097152,  # Very small chunks
-                'sleep_interval': 10,
-                'max_sleep_interval': 30,
-                # Simple user agent
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Referer': 'https://www.youtube.com/',
-                },
-                'cookiefile': None,
-                'cookiesfrombrowser': None,
-                # Minimal format selection
-                'format': 'worst[ext=mp4]/worst',
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                if info and info.get('title'):
-                    print(f"[INFO] Method 3 successful: {info.get('title')}")
-                    return _process_video_info(info, url)
-                    
-        except Exception as e:
-            print(f"[INFO] Method 3 failed: {str(e)}")
-            print(f"[INFO] Method 3 error type: {type(e).__name__}")
-        
-        # Method 4: Try with different YouTube URL formats and extractors
-        try:
-            print(f"[INFO] Method 4: Alternative URL formats...")
-            
-            # Try different URL formats
-            video_id = extract_video_id(url)
-            alternative_urls = [
-                f"https://m.youtube.com/watch?v={video_id}",
-                f"https://www.youtube.com/embed/{video_id}",
-                f"https://youtu.be/{video_id}",
-                f"https://www.youtube.com/v/{video_id}"
-            ]
-            
-            for alt_url in alternative_urls:
-                try:
-                    print(f"[INFO] Trying alternative URL: {alt_url}")
-                    ydl_opts = {
-                        'quiet': True,
-                        'no_warnings': True,
-                        'extract_flat': False,
-                        'nocheckcertificate': True,
-                        'no_check_certificate': True,
-                        'ignoreerrors': False,
-                        'extractor_retries': 2,
-                        'retries': 2,
-                        'fragment_retries': 2,
-                        'http_chunk_size': 1048576,  # 1MB chunks
-                        'sleep_interval': 15,
-                        'max_sleep_interval': 45,
-                        # Different user agent for each attempt
-                        'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                            'Accept-Language': 'en-US,en;q=0.9',
-                            'Accept-Encoding': 'gzip, deflate, br',
-                            'Referer': 'https://www.youtube.com/',
-                            'Sec-Fetch-Dest': 'document',
-                            'Sec-Fetch-Mode': 'navigate',
-                            'Sec-Fetch-Site': 'same-origin',
-                        },
-                        'cookiefile': None,
-                        'cookiesfrombrowser': None,
-                        # Try different extractor settings
-                        'extractor_args': {
-                            'youtube': {
-                                'skip': ['dash', 'storyboard', 'image'],
-                                'player_client': ['web'],
-                                'player_skip': ['webpage'],
-                            }
-                        },
-                        'format': 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best',
-                    }
-                    
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(alt_url, download=False)
-                        
-                        if info and info.get('title'):
-                            print(f"[INFO] Method 4 successful with {alt_url}: {info.get('title')}")
-                            return _process_video_info(info, url)
-                            
-                except Exception as e:
-                    print(f"[INFO] Alternative URL {alt_url} failed: {str(e)}")
-                    continue
-                    
-        except Exception as e:
-            print(f"[INFO] Method 4 failed: {str(e)}")
-            print(f"[INFO] Method 4 error type: {type(e).__name__}")
-        
-        # Method 5: Try with age verification bypass and different approach
-        try:
-            print(f"[INFO] Method 5: Age verification bypass...")
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                # Age verification bypass
-                'age_limit': 0,  # No age limit
-                'nocheckcertificate': True,
-                'no_check_certificate': True,
-                'ignoreerrors': False,
-                'extractor_retries': 3,
-                'retries': 3,
-                'fragment_retries': 3,
-                'http_chunk_size': 2097152,  # 2MB chunks
-                'sleep_interval': 20,
-                'max_sleep_interval': 60,
-                # Very simple user agent
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Referer': 'https://www.youtube.com/',
-                },
-                'cookiefile': None,
-                'cookiesfrombrowser': None,
-                # Try to bypass age verification
-                'extractor_args': {
-                    'youtube': {
-                        'skip': ['dash', 'storyboard', 'image'],
+                        'skip': ['storyboard', 'image'],
                         'player_client': ['web'],
-                        'player_skip': ['webpage', 'configs'],
-                        'age_limit': 0,
+                        'player_skip': [],
                     }
                 },
-                # Use very basic format
-                'format': 'worst[ext=mp4]/worst',
-                # Add cookies to bypass age verification
-                'cookies': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+                'format': 'best[ext=mp4]/best',
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
                 if info and info.get('title'):
-                    print(f"[INFO] Method 5 successful: {info.get('title')}")
+                    print(f"[LOCAL MODE] Method 2 successful: {info.get('title')}")
+                    sessions['last_request'] = url
+                    sessions['successful_requests'] = sessions.get('successful_requests', 0) + 1
+                    save_sessions(sessions)
                     return _process_video_info(info, url)
                     
         except Exception as e:
-            print(f"[INFO] Method 5 failed: {str(e)}")
-            print(f"[INFO] Method 5 error type: {type(e).__name__}")
+            print(f"[LOCAL MODE] Method 2 failed: {str(e)}")
+            print(f"[LOCAL MODE] Error type: {type(e).__name__}")
         
-        # Method 6: Try with browser cookies and different extractor
+        # Method 3: Minimal local approach (like when local fails)
         try:
-            print(f"[INFO] Method 6: Browser cookies approach...")
+            print(f"[LOCAL MODE] Method 3: Minimal local approach...")
             ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
+                'quiet': False,
+                'no_warnings': False,
                 'extract_flat': False,
-                'nocheckcertificate': True,
-                'no_check_certificate': True,
+                # Minimal settings like local
+                'nocheckcertificate': False,
+                'no_check_certificate': False,
                 'ignoreerrors': False,
-                'extractor_retries': 2,
-                'retries': 2,
-                'fragment_retries': 2,
-                'http_chunk_size': 1048576,  # 1MB chunks
-                'sleep_interval': 25,
-                'max_sleep_interval': 75,
-                # Try to use browser cookies
-                'cookiesfrombrowser': ('chrome',),  # Try Chrome first
-                'cookiefile': None,
-                # Different user agent
-                'user_agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'extractor_retries': 1,
+                'retries': 1,
+                'fragment_retries': 1,
+                'http_chunk_size': 1048576,
+                'sleep_interval': 0,
+                'max_sleep_interval': 0,
+                # Keep same user agent
+                'user_agent': sessions['user_agent'],
+                # Minimal headers
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': sessions['user_agent'],
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
                     'Referer': 'https://www.youtube.com/',
                 },
-                # Try different extractor approach
-                'extractor_args': {
-                    'youtube': {
-                        'skip': ['dash', 'storyboard', 'image'],
-                        'player_client': ['web'],
-                        'player_skip': ['webpage'],
-                        'extract_flat': False,
-                    }
-                },
-                'format': 'best[height<=360][ext=mp4]/best[height<=360]/best[ext=mp4]/best',
+                'cookiefile': None,
+                'cookiesfrombrowser': None,
+                # Very basic format
+                'format': 'best',
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
                 if info and info.get('title'):
-                    print(f"[INFO] Method 6 successful: {info.get('title')}")
+                    print(f"[LOCAL MODE] Method 3 successful: {info.get('title')}")
+                    sessions['last_request'] = url
+                    sessions['successful_requests'] = sessions.get('successful_requests', 0) + 1
+                    save_sessions(sessions)
                     return _process_video_info(info, url)
                     
         except Exception as e:
-            print(f"[INFO] Method 6 failed: {str(e)}")
-            print(f"[INFO] Method 6 error type: {type(e).__name__}")
+            print(f"[LOCAL MODE] Method 3 failed: {str(e)}")
+            print(f"[LOCAL MODE] Error type: {type(e).__name__}")
         
-        # All methods failed
-        print(f"[ERROR] All extraction methods failed for URL: {url}")
-        print(f"[ERROR] Video ID: {extract_video_id(url)}")
+        # All local methods failed - this is unusual
+        print(f"[LOCAL MODE] All local simulation methods failed for URL: {url}")
+        print(f"[LOCAL MODE] This suggests YouTube may have updated their system")
+        
+        # Update session with failure
+        sessions['failed_requests'] = sessions.get('failed_requests', 0) + 1
+        sessions['last_error'] = str(e)
+        save_sessions(sessions)
+        
         return jsonify({
-            'error': 'Could not extract video info. YouTube may have updated their anti-bot measures.',
-            'suggestion': 'Try using a different video or check if the video is available',
-            'methods_tried': ['Aggressive bypass', 'Mobile approach', 'Minimal options', 'Alternative URLs', 'Age verification bypass', 'Browser cookies'],
+            'error': 'Local simulation methods failed. This is unusual and may indicate YouTube has updated their system.',
+            'suggestion': 'Try again in a few minutes or check if YouTube is experiencing issues',
+            'session_info': {
+                'session_id': sessions['session_id'],
+                'user_agent': sessions['user_agent'],
+                'successful_requests': sessions.get('successful_requests', 0),
+                'failed_requests': sessions.get('failed_requests', 0),
+                'total_requests': sessions['request_count']
+            },
             'debug_info': {
                 'url': url,
                 'video_id': extract_video_id(url),
-                'timestamp': '2024-01-18'
+                'timestamp': datetime.now().isoformat()
             }
         }), 500
         
@@ -541,26 +504,30 @@ def download_video():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Configure yt-dlp options for download
+        # Configure yt-dlp options for download using local-like behavior
+        sessions = create_local_like_session()
+        print(f"[LOCAL MODE] Download using session ID: {sessions['session_id']}")
+        
         ydl_opts = {
-            'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
+            'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio
             'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(format_id)s.mp4'),  # Output as MP4
-            'quiet': False,  # Show more output for debugging
-            'no_warnings': False,  # Show warnings
+            'quiet': False,  # Show output like local
+            'no_warnings': False,  # Show warnings like local
             'merge_output_format': 'mp4',  # Force MP4 output
             'skip': ['storyboard', 'image'],
             'extractaudio': False,
             'audioformat': None,
-            'nocheckcertificate': True,
+            'nocheckcertificate': False,  # Don't skip certs like local
             'ignoreerrors': False,
             'verbose': True,  # Add verbose output for debugging
-            # Add options to handle 403 errors
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'retries': 3,  # Retry failed downloads
-            'fragment_retries': 3,  # Retry fragment downloads
-            'http_chunk_size': 10485760,  # 10MB chunks
-            'sleep_interval': 1,  # Sleep between requests
-            'max_sleep_interval': 5,  # Maximum sleep interval
+            # Use local-like settings
+            'user_agent': sessions['user_agent'],
+            'http_headers': get_realistic_headers(sessions),
+            'retries': 1,  # Minimal retries like local
+            'fragment_retries': 1,
+            'http_chunk_size': 1048576,  # Small chunks like local
+            'sleep_interval': 0,  # No artificial delays like local
+            'max_sleep_interval': 0,
             # Better format handling
             'prefer_ffmpeg': True,  # Use FFmpeg for better merging
             'postprocessors': [{
@@ -1046,6 +1013,68 @@ def test_auth_bypass():
             'status': 'error',
             'error': str(e),
             'timestamp': '2024-01-18'
+        }), 500
+
+@app.route('/session_status')
+def session_status():
+    """View current session status and debug information"""
+    try:
+        sessions = load_sessions()
+        user_agents = load_user_agents()
+        
+        return jsonify({
+            'status': 'success',
+            'current_session': {
+                'session_id': sessions.get('session_id', 'Unknown'),
+                'user_agent': sessions.get('user_agent', 'Unknown'),
+                'request_count': sessions.get('request_count', 0),
+                'successful_requests': sessions.get('successful_requests', 0),
+                'failed_requests': sessions.get('failed_requests', 0),
+                'last_request': sessions.get('last_request', 'None'),
+                'last_error': sessions.get('last_error', 'None'),
+                'last_behavior': sessions.get('last_behavior', {}),
+                'created_at': sessions.get('created_at', 'Unknown')
+            },
+            'available_user_agents': user_agents,
+            'session_file': SESSIONS_FILE,
+            'user_agents_file': USER_AGENTS_FILE,
+            'timestamp': datetime.now().isoformat(),
+            'local_mode': True
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/reset_session')
+def reset_session():
+    """Reset the current session to start fresh"""
+    try:
+        # Remove session files
+        if os.path.exists(SESSIONS_FILE):
+            os.remove(SESSIONS_FILE)
+        if os.path.exists(USER_AGENTS_FILE):
+            os.remove(USER_AGENTS_FILE)
+        
+        # Create new session
+        global GLOBAL_SESSIONS
+        GLOBAL_SESSIONS = create_local_like_session()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Session reset successfully',
+            'new_session_id': GLOBAL_SESSIONS['session_id'],
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
         }), 500
 
 if __name__ == '__main__':
