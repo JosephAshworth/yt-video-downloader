@@ -131,25 +131,25 @@ def get_invidious_instances():
                 instance.get('monitoring', {}).get('status') == 'healthy'
             ]
             if working_instances:
-                print(f"[Invidious] Found {len(working_instances)} working instances")
+                print(f"[Invidious] Found {len(working_instances)} working instances from API")
                 return working_instances[:5]  # Return top 5 working instances
     except Exception as e:
-        print(f"[Invidious] Failed to fetch instances: {str(e)}")
+        print(f"[Invidious] Failed to fetch instances from API: {str(e)}")
     
-    # Fallback instances (hardcoded reliable ones)
+    # Updated fallback instances (more reliable ones)
     fallback_instances = [
         'https://invidious.projectsegfau.lt',
         'https://invidious.slipfox.xyz',
         'https://invidious.prvcypwn.com',
         'https://invidious.snopyta.org',
         'https://invidious.kavin.rocks',
-        'https://invidious.weblibre.org',
-        'https://invidious.poal.co',
-        'https://invidious.moomoo.me',
-        'https://invidious.13ad.de',
-        'https://invidious.pw'
+        'https://invidious.nerdvpn.de',
+        'https://invidious.baczek.me',
+        'https://invidious.1d4.us',
+        'https://invidious.woodland.cafe',
+        'https://invidious.rawbit.ninja'
     ]
-    print(f"[Invidious] Using {len(fallback_instances)} fallback instances")
+    print(f"[Invidious] Using {len(fallback_instances)} updated fallback instances")
     return fallback_instances
 
 def extract_video_info_invidious(url):
@@ -176,9 +176,20 @@ def extract_video_info_invidious(url):
             print(f"[Invidious] Instance {instance} returned status: {response.status_code}")
             
             if response and response.status_code == 200:
+                # Check if response is actually JSON (not HTML redirect)
+                content_type = response.headers.get('content-type', '')
+                if 'application/json' not in content_type and 'text/html' in content_type:
+                    print(f"[Invidious] Instance {instance} returned HTML instead of JSON (likely redirect)")
+                    continue
+                
                 # Validate response content
                 if not response.text or response.text.strip() == '':
                     print(f"[Invidious] Instance {instance} returned empty response")
+                    continue
+                
+                # Check if response starts with HTML (redirect)
+                if response.text.strip().startswith('<'):
+                    print(f"[Invidious] Instance {instance} returned HTML response (likely redirect)")
                     continue
                 
                 try:
@@ -241,6 +252,8 @@ def extract_video_info_invidious(url):
                     print(f"[Invidious] Instance {instance} video not found (404)")
                 elif response.status_code == 429:
                     print(f"[Invidious] Instance {instance} rate limited (429)")
+                elif response.status_code == 301 or response.status_code == 302:
+                    print(f"[Invidious] Instance {instance} redirecting ({response.status_code})")
                 
         except requests.exceptions.Timeout:
             print(f"[Invidious] Instance {instance} timed out")
@@ -1097,13 +1110,37 @@ def download_video_alternative():
         info, error = extract_video_info_invidious(url)
         if not info or error:
             print(f"[Alternative Download] Invidious failed: {error}")
+            print(f"[Alternative Download] Trying completely different method as fallback...")
+            
+            # Fallback to completely different method
+            try:
+                info, error = extract_video_info_completely_different(url)
+                if info and not error:
+                    print(f"[Alternative Download] Completely different method successful as fallback")
+                    return _handle_download_with_info(info, format_id, url, "Completely Different (Fallback)")
+                else:
+                    print(f"[Alternative Download] Completely different method also failed: {error}")
+            except Exception as fallback_error:
+                print(f"[Alternative Download] Completely different fallback failed: {str(fallback_error)}")
+            
             return jsonify({
                 'error': f'Invidious method failed: {error}',
+                'fallback_attempted': True,
                 'suggestion': 'Try using the main download route with yt-dlp fallback'
             }), 500
         
         print(f"[Alternative Download] Invidious successful, found {len(info.get('formats', []))} formats")
+        return _handle_download_with_info(info, format_id, url, "Invidious API")
         
+    except Exception as e:
+        print(f"[Alternative Download] Error in download_video_alternative: {str(e)}")
+        import traceback
+        print(f"[Alternative Download] Full traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
+
+def _handle_download_with_info(info, format_id, url, method_name):
+    """Handle the download process with extracted video info"""
+    try:
         # Find the requested format
         selected_format = None
         if format_id == 'best':
@@ -1149,10 +1186,10 @@ def download_video_alternative():
         filename = f"{safe_title}_{selected_format.get('height', 'unknown')}p.mp4"
         output_path = os.path.join(UPLOAD_FOLDER, filename)
         
-        print(f"[Alternative Download] Downloading {filename} from Invidious...")
+        print(f"[Alternative Download] Downloading {filename} using {method_name}...")
         print(f"[Alternative Download] Download URL: {selected_format.get('url')[:100]}...")
         
-        # Download the video using the direct URL from Invidious
+        # Download the video using the direct URL
         success, message = download_video_direct(selected_format['url'], selected_format, output_path)
         
         if success:
@@ -1166,7 +1203,7 @@ def download_video_alternative():
                 'title': info.get('title', 'Unknown Title'),
                 'filesize': file_size,
                 'selected_quality': f"{selected_format.get('height', 'Unknown')}p",
-                'method': 'Invidious API (Direct Download)',
+                'method': f'{method_name} (Direct Download)',
                 'message': message,
                 'format_details': {
                     'height': selected_format.get('height'),
@@ -1190,12 +1227,10 @@ def download_video_alternative():
                 'format_info': selected_format,
                 'suggestion': 'Try a different quality or use the main download route'
             }), 500
-        
+            
     except Exception as e:
-        print(f"[Alternative Download] Error in download_video_alternative: {str(e)}")
-        import traceback
-        print(f"[Alternative Download] Full traceback: {traceback.format_exc()}")
-        return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
+        print(f"[Alternative Download] Error in _handle_download_with_info: {str(e)}")
+        return jsonify({'error': f'Error handling download: {str(e)}'}), 500
 
 @app.route('/download_1080p', methods=['POST'])
 def download_1080p():
