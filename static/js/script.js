@@ -11,17 +11,6 @@ const videoInfoSection = document.getElementById('videoInfoSection');
 const downloadProgress = document.getElementById('downloadProgress');
 const downloadComplete = document.getElementById('downloadComplete');
 
-// Authentication elements
-const cookiesFileInput = document.getElementById('cookiesFile');
-const uploadCookiesBtn = document.getElementById('uploadCookiesBtn');
-const usernameInput = document.getElementById('username');
-const passwordInput = document.getElementById('password');
-const setCredentialsBtn = document.getElementById('setCredentialsBtn');
-const checkAuthBtn = document.getElementById('checkAuthBtn');
-const clearAuthBtn = document.getElementById('clearAuthBtn');
-const cookiesStatus = document.getElementById('cookiesStatus');
-const credentialsStatus = document.getElementById('credentialsStatus');
-
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
     analyzeBtn.addEventListener('click', analyzeVideo);
@@ -30,12 +19,6 @@ document.addEventListener('DOMContentLoaded', function() {
             analyzeVideo();
         }
     });
-    
-    // Authentication event listeners
-    uploadCookiesBtn.addEventListener('click', uploadCookies);
-    setCredentialsBtn.addEventListener('click', setCredentials);
-    checkAuthBtn.addEventListener('click', checkAuthStatus);
-    clearAuthBtn.addEventListener('click', clearAuth);
     
     // Download button event listener will be added dynamically
     document.addEventListener('click', function(e) {
@@ -49,9 +32,6 @@ document.addEventListener('DOMContentLoaded', function() {
             resetApp();
         }
     });
-    
-    // Check authentication status on page load
-    checkAuthStatus();
 });
 
 // Analyze video function
@@ -383,159 +363,3 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 5000);
     });
 }); 
-
-// Authentication functions
-async function uploadCookies() {
-    const file = cookiesFileInput.files[0];
-    if (!file) {
-        showAuthStatus(cookiesStatus, 'Please select a cookies file', 'error');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('cookies_file', file);
-    
-    try {
-        uploadCookiesBtn.disabled = true;
-        uploadCookiesBtn.textContent = 'Uploading...';
-        
-        const response = await fetch('/upload_cookies', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            showAuthStatus(cookiesStatus, data.message, 'success');
-            checkAuthStatus(); // Refresh status
-        } else {
-            showAuthStatus(cookiesStatus, data.error, 'error');
-        }
-    } catch (error) {
-        showAuthStatus(cookiesStatus, 'Upload failed: ' + error.message, 'error');
-    } finally {
-        uploadCookiesBtn.disabled = false;
-        uploadCookiesBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Cookies';
-    }
-}
-
-async function setCredentials() {
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-    
-    if (!username || !password) {
-        showAuthStatus(credentialsStatus, 'Please enter both username and password', 'error');
-        return;
-    }
-    
-    try {
-        setCredentialsBtn.disabled = true;
-        setCredentialsBtn.textContent = 'Setting...';
-        
-        const response = await fetch('/set_credentials', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ username, password })
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            showAuthStatus(credentialsStatus, data.message, 'success');
-            usernameInput.value = '';
-            passwordInput.value = '';
-            checkAuthStatus(); // Refresh status
-        } else {
-            showAuthStatus(credentialsStatus, data.error, 'error');
-        }
-    } catch (error) {
-        showAuthStatus(credentialsStatus, 'Failed to set credentials: ' + error.message, 'error');
-    } finally {
-        setCredentialsBtn.disabled = false;
-        setCredentialsBtn.innerHTML = '<i class="fas fa-save"></i> Set Credentials';
-    }
-}
-
-async function checkAuthStatus() {
-    try {
-        const response = await fetch('/auth_status');
-        const data = await response.json();
-        
-        if (response.ok) {
-            updateAuthUI(data);
-        } else {
-            console.error('Failed to check auth status:', data.error);
-        }
-    } catch (error) {
-        console.error('Error checking auth status:', error);
-    }
-}
-
-async function clearAuth() {
-    if (!confirm('Are you sure you want to clear all authentication data?')) {
-        return;
-    }
-    
-    try {
-        clearAuthBtn.disabled = true;
-        clearAuthBtn.textContent = 'Clearing...';
-        
-        const response = await fetch('/clear_auth', {
-            method: 'POST'
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            showAuthStatus(cookiesStatus, 'Cookies cleared', 'success');
-            showAuthStatus(credentialsStatus, 'Credentials cleared', 'success');
-            checkAuthStatus(); // Refresh status
-        } else {
-            console.error('Failed to clear auth:', data.error);
-        }
-    } catch (error) {
-        console.error('Error clearing auth:', error);
-    } finally {
-        clearAuthBtn.disabled = false;
-        clearAuthBtn.innerHTML = '<i class="fas fa-trash"></i> Clear Auth';
-    }
-}
-
-function updateAuthUI(authData) {
-    // Update cookies status
-    if (authData.cookies_configured) {
-        showAuthStatus(cookiesStatus, '✅ Cookies configured and working', 'success');
-    } else {
-        showAuthStatus(cookiesStatus, '❌ No cookies configured', 'info');
-    }
-    
-    // Update credentials status
-    if (authData.credentials_configured) {
-        showAuthStatus(credentialsStatus, '✅ Credentials configured', 'success');
-    } else {
-        showAuthStatus(credentialsStatus, '❌ No credentials configured', 'info');
-    }
-    
-    // Update overall auth status
-    if (authData.authenticated) {
-        document.querySelector('.auth-section').classList.add('authenticated');
-    } else {
-        document.querySelector('.auth-section').classList.remove('authenticated');
-    }
-}
-
-function showAuthStatus(element, message, type) {
-    element.textContent = message;
-    element.className = `auth-status ${type}`;
-    
-    // Auto-clear success messages after 5 seconds
-    if (type === 'success') {
-        setTimeout(() => {
-            element.textContent = '';
-            element.className = 'auth-status';
-        }, 5000);
-    }
-} 
