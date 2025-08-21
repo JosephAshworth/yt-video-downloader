@@ -1078,9 +1078,9 @@ def download_video():
 
 @app.route('/download_video_alternative', methods=['POST'])
 def download_video_alternative():
-    """Download video using alternative methods (no yt-dlp)"""
+    """Download video using Invidious method specifically"""
     try:
-        print(f"[Alternative] download_video_alternative called")
+        print(f"[Alternative Download] download_video_alternative called")
         data = request.get_json()
         url = data.get('url', '').strip()
         format_id = data.get('format_id', 'best')
@@ -1091,72 +1091,110 @@ def download_video_alternative():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        print(f"[Alternative] Trying Invidious download...")
+        print(f"[Alternative Download] Using Invidious method for download...")
         
-        # Try Invidious first
+        # Use Invidious specifically for downloading
         info, error = extract_video_info_invidious(url)
-        if info and not error:
-            # Find the requested format
-            selected_format = None
-            for fmt in info.get('formats', []):
-                if str(fmt.get('format_id')) == str(format_id) or format_id == 'best':
-                    selected_format = fmt
-                    if format_id == 'best':
-                        break  # Use first (highest quality) format
-            
-            if selected_format and selected_format.get('url'):
-                # Generate filename
-                safe_title = "".join(c for c in info.get('title', 'Unknown') if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                filename = f"{safe_title}_{selected_format.get('height', 'unknown')}p.mp4"
-                output_path = os.path.join(UPLOAD_FOLDER, filename)
-                
-                print(f"[Alternative] Downloading {filename} from Invidious...")
-                
-                # Download the video
-                success, message = download_video_direct(selected_format['url'], selected_format, output_path)
-                
-                if success:
-                    file_size = os.path.getsize(output_path)
-                    print(f"[Alternative] Download successful: {filename}, size: {file_size}")
-                    return jsonify({
-                        'success': True,
-                        'filename': filename,
-                        'filepath': output_path,
-                        'title': info.get('title', 'Unknown Title'),
-                        'filesize': file_size,
-                        'selected_quality': f"{selected_format.get('height', 'Unknown')}p",
-                        'method': 'Invidious API',
-                        'message': message
-                    })
-                else:
-                    print(f"[Alternative] Download failed: {message}")
-                    return jsonify({'error': f'Download failed: {message}'}), 500
-            else:
-                print(f"[Alternative] Selected format not available")
-                return jsonify({'error': 'Selected format not available'}), 400
-        
-        print(f"[Alternative] Invidious failed, trying direct YouTube...")
-        
-        # Fallback to direct YouTube (limited format options)
-        info, error = extract_video_info_direct(url)
-        if info and not error:
-            # For direct extraction, we can only get basic info
-            safe_title = "".join(c for c in info.get('title', 'Unknown') if c.isalnum() or c in (' ', '-', '_')).rstrip()
-            filename = f"{safe_title}_basic.mp4"
-            output_path = os.path.join(UPLOAD_FOLDER, filename)
-            
-            print(f"[Alternative] Direct YouTube extraction only provides basic info")
+        if not info or error:
+            print(f"[Alternative Download] Invidious failed: {error}")
             return jsonify({
-                'success': False,
-                'error': 'Direct YouTube extraction only provides basic info. Please use Invidious method or try again later.',
-                'available_info': info
+                'error': f'Invidious method failed: {error}',
+                'suggestion': 'Try using the main download route with yt-dlp fallback'
+            }), 500
+        
+        print(f"[Alternative Download] Invidious successful, found {len(info.get('formats', []))} formats")
+        
+        # Find the requested format
+        selected_format = None
+        if format_id == 'best':
+            # Use highest quality available
+            formats = info.get('formats', [])
+            if formats:
+                selected_format = formats[0]  # First one is highest quality (sorted by height)
+                print(f"[Alternative Download] Selected best quality: {selected_format.get('height')}p")
+        else:
+            # Find specific format
+            for fmt in info.get('formats', []):
+                if str(fmt.get('format_id')) == str(format_id):
+                    selected_format = fmt
+                    break
+        
+        if not selected_format:
+            print(f"[Alternative Download] Requested format {format_id} not found")
+            # Return available formats for user to choose
+            available_formats = []
+            for fmt in info.get('formats', []):
+                available_formats.append({
+                    'format_id': fmt.get('format_id'),
+                    'height': fmt.get('height'),
+                    'ext': fmt.get('ext'),
+                    'format_note': fmt.get('format_note')
+                })
+            
+            return jsonify({
+                'error': f'Requested format {format_id} not found',
+                'available_formats': available_formats,
+                'suggestion': 'Choose from available formats above'
             }), 400
         
-        print(f"[Alternative] All alternative methods failed")
-        return jsonify({'error': 'All alternative methods failed. Please try again later.'}), 500
+        if not selected_format.get('url'):
+            print(f"[Alternative Download] Selected format has no URL")
+            return jsonify({
+                'error': 'Selected format has no download URL',
+                'format_info': selected_format
+            }), 500
+        
+        # Generate filename
+        safe_title = "".join(c for c in info.get('title', 'Unknown') if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        filename = f"{safe_title}_{selected_format.get('height', 'unknown')}p.mp4"
+        output_path = os.path.join(UPLOAD_FOLDER, filename)
+        
+        print(f"[Alternative Download] Downloading {filename} from Invidious...")
+        print(f"[Alternative Download] Download URL: {selected_format.get('url')[:100]}...")
+        
+        # Download the video using the direct URL from Invidious
+        success, message = download_video_direct(selected_format['url'], selected_format, output_path)
+        
+        if success:
+            file_size = os.path.getsize(output_path)
+            print(f"[Alternative Download] Download successful: {filename}, size: {file_size}")
+            
+            return jsonify({
+                'success': True,
+                'filename': filename,
+                'filepath': output_path,
+                'title': info.get('title', 'Unknown Title'),
+                'filesize': file_size,
+                'selected_quality': f"{selected_format.get('height', 'Unknown')}p",
+                'method': 'Invidious API (Direct Download)',
+                'message': message,
+                'format_details': {
+                    'height': selected_format.get('height'),
+                    'ext': selected_format.get('ext'),
+                    'format_note': selected_format.get('format_note')
+                }
+            })
+        else:
+            print(f"[Alternative Download] Download failed: {message}")
+            
+            # Try to clean up failed download
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                    print(f"[Alternative Download] Cleaned up failed download file")
+                except:
+                    pass
+            
+            return jsonify({
+                'error': f'Download failed: {message}',
+                'format_info': selected_format,
+                'suggestion': 'Try a different quality or use the main download route'
+            }), 500
         
     except Exception as e:
-        print(f"[Alternative] Error in download_video_alternative: {str(e)}")
+        print(f"[Alternative Download] Error in download_video_alternative: {str(e)}")
+        import traceback
+        print(f"[Alternative Download] Full traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
 
 @app.route('/download_1080p', methods=['POST'])
@@ -2118,6 +2156,125 @@ def test_completely_different():
                 'test_url': test_url,
                 'error': error,
                 'method': 'Completely Different'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'error_type': str(type(e)),
+            'timestamp': '2024-01-18'
+        }), 500
+
+@app.route('/test_invidious_download')
+def test_invidious_download():
+    """Test Invidious download functionality specifically"""
+    try:
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+        
+        print(f"[Test] Testing Invidious download with URL: {test_url}")
+        
+        # Test Invidious info extraction
+        info, error = extract_video_info_invidious(test_url)
+        
+        if not info or error:
+            return jsonify({
+                'status': 'failed',
+                'message': 'Invidious info extraction failed',
+                'test_url': test_url,
+                'error': error,
+                'method': 'Invidious API'
+            })
+        
+        # Test download functionality
+        formats = info.get('formats', [])
+        if not formats:
+            return jsonify({
+                'status': 'failed',
+                'message': 'No formats found for download',
+                'test_url': test_url,
+                'info': info,
+                'method': 'Invidious API'
+            })
+        
+        # Check if formats have URLs
+        formats_with_urls = [f for f in formats if f.get('url')]
+        if not formats_with_urls:
+            return jsonify({
+                'status': 'failed',
+                'message': 'No formats with download URLs found',
+                'test_url': test_url,
+                'formats': formats,
+                'method': 'Invidious API'
+            })
+        
+        # Test a small download (first few seconds)
+        test_format = formats_with_urls[0]  # Use first available format
+        print(f"[Test] Testing download with format: {test_format}")
+        
+        # Create a test filename
+        test_filename = f"test_invidious_{test_format.get('height', 'unknown')}p.mp4"
+        test_output_path = os.path.join(UPLOAD_FOLDER, test_filename)
+        
+        # Try to download first few MB to test
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Referer': 'https://www.youtube.com/',
+            }
+            
+            response = requests.get(test_format['url'], headers=headers, stream=True, timeout=30)
+            if response.ok:
+                # Download first 1MB to test
+                downloaded = 0
+                max_download = 1024 * 1024  # 1MB
+                
+                with open(test_output_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if downloaded >= max_download:
+                                break
+                
+                # Clean up test file
+                if os.path.exists(test_output_path):
+                    os.remove(test_output_path)
+                    print(f"[Test] Test download successful, cleaned up test file")
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Invidious download test successful',
+                    'test_url': test_url,
+                    'title': info.get('title', 'Unknown'),
+                    'formats_count': len(formats),
+                    'formats_with_urls': len(formats_with_urls),
+                    'test_format': {
+                        'height': test_format.get('height'),
+                        'ext': test_format.get('ext'),
+                        'format_note': test_format.get('format_note'),
+                        'url_length': len(test_format.get('url', ''))
+                    },
+                    'method': 'Invidious API',
+                    'download_test': 'Passed (1MB test)'
+                })
+            else:
+                return jsonify({
+                    'status': 'failed',
+                    'message': 'Download test failed',
+                    'test_url': test_url,
+                    'response_status': response.status_code,
+                    'method': 'Invidious API'
+                })
+                
+        except Exception as download_error:
+            return jsonify({
+                'status': 'failed',
+                'message': 'Download test error',
+                'test_url': test_url,
+                'error': str(download_error),
+                'method': 'Invidious API'
             })
             
     except Exception as e:
