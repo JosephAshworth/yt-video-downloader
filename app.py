@@ -7,8 +7,13 @@ import random
 import time
 import json
 import requests
+import sys
 from urllib.parse import urlparse, parse_qs
 import subprocess
+
+# Environment detection
+IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
+IS_RENDER = os.environ.get('RENDER') == 'true'
 
 app = Flask(__name__)
 
@@ -135,6 +140,50 @@ def generate_fake_cookies():
     
     return cookies
 
+def check_environment():
+    """Check the current environment and log important details"""
+    env_info = {
+        'python_version': sys.version,
+        'python_executable': sys.executable,
+        'working_directory': os.getcwd(),
+        'environment_vars': {
+            'FLASK_ENV': os.environ.get('FLASK_ENV'),
+            'RENDER': os.environ.get('RENDER'),
+            'PORT': os.environ.get('PORT'),
+            'PYTHON_VERSION': os.environ.get('PYTHON_VERSION')
+        },
+        'is_production': IS_PRODUCTION,
+        'is_render': IS_RENDER
+    }
+    
+    print(f"[Environment] Environment info: {json.dumps(env_info, indent=2)}")
+    return env_info
+
+def safe_request_get(url, headers=None, timeout=30, max_retries=3):
+    """Safe HTTP GET request with retries and error handling"""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout)
+            return response
+        except requests.exceptions.Timeout:
+            print(f"[Request] Timeout on attempt {attempt + 1} for {url}")
+            if attempt == max_retries - 1:
+                raise
+        except requests.exceptions.ConnectionError:
+            print(f"[Request] Connection error on attempt {attempt + 1} for {url}")
+            if attempt == max_retries - 1:
+                raise
+        except Exception as e:
+            print(f"[Request] Unexpected error on attempt {attempt + 1} for {url}: {str(e)}")
+            if attempt == max_retries - 1:
+                raise
+        
+        # Wait before retry
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)  # Exponential backoff
+    
+    return None
+
 def get_enhanced_headers_for_user_agent(user_agent):
     """Get enhanced headers with cookies and additional bot avoidance"""
     base_headers = get_headers_for_user_agent(user_agent)
@@ -233,8 +282,8 @@ def extract_video_info_direct(url):
         }
         
         try:
-            response = requests.get(oembed_url, headers=headers, timeout=30)
-            if response.status_code == 200:
+            response = safe_request_get(oembed_url, headers=headers, timeout=30)
+            if response and response.status_code == 200:
                 # Validate response content
                 if not response.text or response.text.strip() == '':
                     print("YouTube oEmbed API returned empty response")
@@ -271,8 +320,8 @@ def extract_video_info_direct(url):
         }
         
         try:
-            response = requests.get(page_url, headers=headers, timeout=30)
-            if response.status_code == 200:
+            response = safe_request_get(page_url, headers=headers, timeout=30)
+            if response and response.status_code == 200:
                 html_content = response.text
                 
                 if not html_content or html_content.strip() == '':
@@ -309,27 +358,37 @@ def get_invidious_instances():
     """Get list of working Invidious instances"""
     try:
         # Try to get instances from invidious.io
-        response = requests.get('https://api.invidious.io/instances.json', timeout=10)
-        if response.status_code == 200:
-            instances = response.json()
-            # Filter for working instances
-            working_instances = [
-                instance['uri'] for instance in instances 
-                if instance.get('type') == 'https' and 
-                instance.get('monitoring', {}).get('status') == 'healthy'
-            ]
-            return working_instances[:5]  # Return top 5 working instances
-    except:
-        pass
+        response = safe_request_get('https://api.invidious.io/instances.json', timeout=10)
+        if response and response.status_code == 200:
+            try:
+                instances = response.json()
+                # Filter for working instances
+                working_instances = [
+                    instance['uri'] for instance in instances 
+                    if isinstance(instance, dict) and
+                    instance.get('type') == 'https' and 
+                    instance.get('monitoring', {}).get('status') == 'healthy'
+                ]
+                if working_instances:
+                    print(f"[Invidious] Found {len(working_instances)} working instances")
+                    return working_instances[:5]  # Return top 5 working instances
+            except json.JSONDecodeError:
+                print("[Invidious] Failed to parse instances.json")
+            except Exception as e:
+                print(f"[Invidious] Error processing instances: {str(e)}")
+    except Exception as e:
+        print(f"[Invidious] Failed to fetch instances: {str(e)}")
     
-    # Fallback instances
-    return [
+    # Fallback instances (hardcoded reliable ones)
+    fallback_instances = [
         'https://invidious.projectsegfau.lt',
         'https://invidious.slipfox.xyz',
         'https://invidious.prvcypwn.com',
         'https://invidious.snopyta.org',
         'https://invidious.kavin.rocks'
     ]
+    print(f"[Invidious] Using {len(fallback_instances)} fallback instances")
+    return fallback_instances
 
 def extract_video_info_invidious(url):
     """Extract video info using Invidious API"""
@@ -347,8 +406,8 @@ def extract_video_info_invidious(url):
                 'Accept': 'application/json',
             }
             
-            response = requests.get(api_url, headers=headers, timeout=15)
-            if response.status_code == 200:
+            response = safe_request_get(api_url, headers=headers, timeout=15)
+            if response and response.status_code == 200:
                 # Validate response content
                 if not response.text or response.text.strip() == '':
                     print(f"Invidious instance {instance} returned empty response")
@@ -486,13 +545,22 @@ def test():
     return jsonify({
         'status': 'ok',
         'message': 'YouTube Downloader is running',
-        'timestamp': '2024-01-18'
+        'timestamp': '2024-01-18',
+        'environment': {
+            'is_production': IS_PRODUCTION,
+            'is_render': IS_RENDER,
+            'flask_env': os.environ.get('FLASK_ENV'),
+            'port': os.environ.get('PORT')
+        }
     })
 
 @app.route('/health')
 def health():
     """Health check route for debugging"""
     try:
+        # Check environment first
+        env_info = check_environment()
+        
         # Test basic functionality
         test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         video_id = extract_video_id(test_url)
@@ -503,13 +571,25 @@ def health():
         # Test user agent generation
         user_agent = get_random_user_agent()
         
+        # Test network connectivity
+        network_tests = {}
+        try:
+            # Test basic internet connectivity
+            test_response = safe_request_get('https://httpbin.org/get', timeout=10)
+            network_tests['basic_connectivity'] = test_response is not None and test_response.status_code == 200
+        except Exception as e:
+            network_tests['basic_connectivity'] = False
+            network_tests['connectivity_error'] = str(e)
+        
         return jsonify({
             'status': 'healthy',
             'timestamp': '2024-01-18',
+            'environment': env_info,
             'tests': {
                 'video_id_extraction': video_id == 'dQw4w9WgXcQ',
                 'invidious_instances': len(instances) > 0,
-                'user_agent_generation': len(user_agent) > 0
+                'user_agent_generation': len(user_agent) > 0,
+                'network_connectivity': network_tests
             },
             'invidious_instances': instances[:3],  # Show first 3
             'user_agent': user_agent
@@ -1429,6 +1509,59 @@ def debug_formats():
             
     except Exception as e:
         return jsonify({'error': f'Debug error: {str(e)}'}), 500
+
+@app.route('/deployment_debug')
+def deployment_debug():
+    """Debug route specifically for deployment issues"""
+    try:
+        debug_info = {
+            'environment': check_environment(),
+            'file_system': {
+                'current_dir': os.getcwd(),
+                'dir_contents': os.listdir('.'),
+                'downloads_dir': os.path.exists(UPLOAD_FOLDER),
+                'downloads_contents': os.listdir(UPLOAD_FOLDER) if os.path.exists(UPLOAD_FOLDER) else []
+            },
+            'python_modules': {
+                'yt_dlp_available': 'yt_dlp' in sys.modules,
+                'requests_available': 'requests' in sys.modules,
+                'flask_available': 'flask' in sys.modules
+            },
+            'network_test': {}
+        }
+        
+        # Test network connectivity
+        try:
+            test_response = safe_request_get('https://httpbin.org/get', timeout=5)
+            debug_info['network_test']['httpbin'] = {
+                'success': test_response is not None and test_response.status_code == 200,
+                'status_code': test_response.status_code if test_response else None
+            }
+        except Exception as e:
+            debug_info['network_test']['httpbin'] = {'success': False, 'error': str(e)}
+        
+        # Test YouTube connectivity
+        try:
+            test_response = safe_request_get('https://www.youtube.com', timeout=10)
+            debug_info['network_test']['youtube'] = {
+                'success': test_response is not None and test_response.status_code == 200,
+                'status_code': test_response.status_code if test_response else None
+            }
+        except Exception as e:
+            debug_info['network_test']['youtube'] = {'success': False, 'error': str(e)}
+        
+        return jsonify({
+            'status': 'ok',
+            'deployment_debug': debug_info,
+            'timestamp': '2024-01-18'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': '2024-01-18'
+        }), 500
 
 if __name__ == '__main__':
     # Use environment variables for production deployment

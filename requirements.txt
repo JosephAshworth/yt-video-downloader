@@ -2,4 +2,8 @@ Flask==2.3.3
 yt-dlp==2023.11.16
 requests==2.31.0
 Werkzeug==2.3.7
-gunicorn==21.2.0 
+gunicorn==21.2.0
+urllib3==1.26.18
+certifi==2023.7.22
+charset-normalizer==3.2.0
+idna==3.4 
