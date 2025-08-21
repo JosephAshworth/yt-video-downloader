@@ -72,115 +72,460 @@ def index():
 
 @app.route('/get_video_info', methods=['POST'])
 def get_video_info():
+    """Extract video information from YouTube URL"""
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
         
-        if not url:
-            return jsonify({'error': 'Please provide a YouTube URL'}), 400
-        
-        if not is_valid_youtube_url(url):
+        if not url or not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Configure yt-dlp options for info extraction
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-        }
+        # Try multiple extraction methods to bypass authentication
+        print(f"[INFO] Attempting to extract video info from: {url}")
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        # Method 1: Try with aggressive authentication bypass
+        try:
+            print(f"[INFO] Method 1: Aggressive authentication bypass...")
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                # Aggressive authentication bypass
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'ignoreerrors': False,
+                'extractor_retries': 5,
+                'retries': 5,
+                'fragment_retries': 5,
+                'http_chunk_size': 10485760,
+                'sleep_interval': 3,
+                'max_sleep_interval': 15,
+                # Multiple user agents to try
+                'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Referer': 'https://www.youtube.com/',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Cache-Control': 'max-age=0',
+                    'DNT': '1',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+                # Cookie and authentication bypass
+                'cookiefile': None,
+                'cookiesfrombrowser': None,
+                # Use different extractor
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'storyboard', 'image'],
+                        'player_client': ['android', 'web'],
+                        'player_skip': ['webpage', 'configs'],
+                    }
+                },
+                # Format selection that works without auth
+                'format': 'best[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]/best',
+            }
             
-            # Get available formats and filter for actual video formats (allow video-only for higher qualities)
-            formats = []
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if info and info.get('title'):
+                    print(f"[INFO] Method 1 successful: {info.get('title')}")
+                    return _process_video_info(info, url)
+                    
+        except Exception as e:
+            print(f"[INFO] Method 1 failed: {str(e)}")
+            print(f"[INFO] Method 1 error type: {type(e).__name__}")
+            if hasattr(e, 'exc_info'):
+                import traceback
+                print(f"[INFO] Method 1 traceback: {traceback.format_exc()}")
+        
+        # Method 2: Try with different extractor and mobile approach
+        try:
+            print(f"[INFO] Method 2: Mobile extractor approach...")
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                # Mobile-specific options
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'ignoreerrors': False,
+                'extractor_retries': 3,
+                'retries': 3,
+                'fragment_retries': 3,
+                'http_chunk_size': 5242880,  # Smaller chunks
+                'sleep_interval': 5,
+                'max_sleep_interval': 20,
+                # Mobile user agent
+                'user_agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Referer': 'https://m.youtube.com/',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Cache-Control': 'max-age=0',
+                    'DNT': '1',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+                'cookiefile': None,
+                'cookiesfrombrowser': None,
+                # Try mobile YouTube
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'storyboard', 'image'],
+                        'player_client': ['android'],
+                        'player_skip': ['webpage', 'configs'],
+                        'extract_flat': False,
+                    }
+                },
+                'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if info and info.get('title'):
+                    print(f"[INFO] Method 2 successful: {info.get('title')}")
+                    return _process_video_info(info, url)
+                    
+        except Exception as e:
+            print(f"[INFO] Method 2 failed: {str(e)}")
+            print(f"[INFO] Method 2 error type: {type(e).__name__}")
+        
+        # Method 3: Try with minimal options and different approach
+        try:
+            print(f"[INFO] Method 3: Minimal options approach...")
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,  # Use flat extraction
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'ignoreerrors': True,  # Ignore errors
+                'extractor_retries': 2,
+                'retries': 2,
+                'fragment_retries': 2,
+                'http_chunk_size': 2097152,  # Very small chunks
+                'sleep_interval': 10,
+                'max_sleep_interval': 30,
+                # Simple user agent
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Referer': 'https://www.youtube.com/',
+                },
+                'cookiefile': None,
+                'cookiesfrombrowser': None,
+                # Minimal format selection
+                'format': 'worst[ext=mp4]/worst',
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if info and info.get('title'):
+                    print(f"[INFO] Method 3 successful: {info.get('title')}")
+                    return _process_video_info(info, url)
+                    
+        except Exception as e:
+            print(f"[INFO] Method 3 failed: {str(e)}")
+            print(f"[INFO] Method 3 error type: {type(e).__name__}")
+        
+        # Method 4: Try with different YouTube URL formats and extractors
+        try:
+            print(f"[INFO] Method 4: Alternative URL formats...")
+            
+            # Try different URL formats
+            video_id = extract_video_id(url)
+            alternative_urls = [
+                f"https://m.youtube.com/watch?v={video_id}",
+                f"https://www.youtube.com/embed/{video_id}",
+                f"https://youtu.be/{video_id}",
+                f"https://www.youtube.com/v/{video_id}"
+            ]
+            
+            for alt_url in alternative_urls:
+                try:
+                    print(f"[INFO] Trying alternative URL: {alt_url}")
+                    ydl_opts = {
+                        'quiet': True,
+                        'no_warnings': True,
+                        'extract_flat': False,
+                        'nocheckcertificate': True,
+                        'no_check_certificate': True,
+                        'ignoreerrors': False,
+                        'extractor_retries': 2,
+                        'retries': 2,
+                        'fragment_retries': 2,
+                        'http_chunk_size': 1048576,  # 1MB chunks
+                        'sleep_interval': 15,
+                        'max_sleep_interval': 45,
+                        # Different user agent for each attempt
+                        'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.9',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Referer': 'https://www.youtube.com/',
+                            'Sec-Fetch-Dest': 'document',
+                            'Sec-Fetch-Mode': 'navigate',
+                            'Sec-Fetch-Site': 'same-origin',
+                        },
+                        'cookiefile': None,
+                        'cookiesfrombrowser': None,
+                        # Try different extractor settings
+                        'extractor_args': {
+                            'youtube': {
+                                'skip': ['dash', 'storyboard', 'image'],
+                                'player_client': ['web'],
+                                'player_skip': ['webpage'],
+                            }
+                        },
+                        'format': 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best',
+                    }
+                    
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(alt_url, download=False)
+                        
+                        if info and info.get('title'):
+                            print(f"[INFO] Method 4 successful with {alt_url}: {info.get('title')}")
+                            return _process_video_info(info, url)
+                            
+                except Exception as e:
+                    print(f"[INFO] Alternative URL {alt_url} failed: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            print(f"[INFO] Method 4 failed: {str(e)}")
+            print(f"[INFO] Method 4 error type: {type(e).__name__}")
+        
+        # Method 5: Try with age verification bypass and different approach
+        try:
+            print(f"[INFO] Method 5: Age verification bypass...")
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                # Age verification bypass
+                'age_limit': 0,  # No age limit
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'ignoreerrors': False,
+                'extractor_retries': 3,
+                'retries': 3,
+                'fragment_retries': 3,
+                'http_chunk_size': 2097152,  # 2MB chunks
+                'sleep_interval': 20,
+                'max_sleep_interval': 60,
+                # Very simple user agent
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.youtube.com/',
+                },
+                'cookiefile': None,
+                'cookiesfrombrowser': None,
+                # Try to bypass age verification
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'storyboard', 'image'],
+                        'player_client': ['web'],
+                        'player_skip': ['webpage', 'configs'],
+                        'age_limit': 0,
+                    }
+                },
+                # Use very basic format
+                'format': 'worst[ext=mp4]/worst',
+                # Add cookies to bypass age verification
+                'cookies': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if info and info.get('title'):
+                    print(f"[INFO] Method 5 successful: {info.get('title')}")
+                    return _process_video_info(info, url)
+                    
+        except Exception as e:
+            print(f"[INFO] Method 5 failed: {str(e)}")
+            print(f"[INFO] Method 5 error type: {type(e).__name__}")
+        
+        # Method 6: Try with browser cookies and different extractor
+        try:
+            print(f"[INFO] Method 6: Browser cookies approach...")
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'ignoreerrors': False,
+                'extractor_retries': 2,
+                'retries': 2,
+                'fragment_retries': 2,
+                'http_chunk_size': 1048576,  # 1MB chunks
+                'sleep_interval': 25,
+                'max_sleep_interval': 75,
+                # Try to use browser cookies
+                'cookiesfrombrowser': ('chrome',),  # Try Chrome first
+                'cookiefile': None,
+                # Different user agent
+                'user_agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Referer': 'https://www.youtube.com/',
+                },
+                # Try different extractor approach
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'storyboard', 'image'],
+                        'player_client': ['web'],
+                        'player_skip': ['webpage'],
+                        'extract_flat': False,
+                    }
+                },
+                'format': 'best[height<=360][ext=mp4]/best[height<=360]/best[ext=mp4]/best',
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if info and info.get('title'):
+                    print(f"[INFO] Method 6 successful: {info.get('title')}")
+                    return _process_video_info(info, url)
+                    
+        except Exception as e:
+            print(f"[INFO] Method 6 failed: {str(e)}")
+            print(f"[INFO] Method 6 error type: {type(e).__name__}")
+        
+        # All methods failed
+        print(f"[ERROR] All extraction methods failed for URL: {url}")
+        print(f"[ERROR] Video ID: {extract_video_id(url)}")
+        return jsonify({
+            'error': 'Could not extract video info. YouTube may have updated their anti-bot measures.',
+            'suggestion': 'Try using a different video or check if the video is available',
+            'methods_tried': ['Aggressive bypass', 'Mobile approach', 'Minimal options', 'Alternative URLs', 'Age verification bypass', 'Browser cookies'],
+            'debug_info': {
+                'url': url,
+                'video_id': extract_video_id(url),
+                'timestamp': '2024-01-18'
+            }
+        }), 500
+        
+    except Exception as e:
+        print(f"Error in get_video_info: {str(e)}")
+        return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
+
+def _process_video_info(info, url):
+    """Process extracted video info and return formatted response"""
+    try:
+        # Get available formats and filter for actual video formats
+        formats = []
+        for f in info.get('formats', []):
+            # Include all video formats (both with and without audio)
+            if (f.get('height') and f.get('ext') and 
+                f.get('vcodec') and f.get('vcodec') != 'none' and
+                f.get('height') >= 144 and  # Minimum reasonable video height
+                f.get('protocol') != 'mhtml' and  # Skip MHTML formats
+                not f.get('ext') in ['html', 'htm', 'mhtml'] and
+                f.get('ext') in ['mp4', 'webm', 'mkv', 'avi', 'mov']):  # Only video formats
+                
+                # Check if this is video-only (no audio)
+                is_video_only = f.get('acodec') == 'none' or not f.get('acodec')
+                
+                formats.append({
+                    'format_id': f.get('format_id', ''),
+                    'height': f.get('height', 0),
+                    'ext': f.get('ext', ''),
+                    'filesize': f.get('filesize', 0),
+                    'format_note': f.get('format_note', ''),
+                    'vcodec': f.get('vcodec', ''),
+                    'acodec': f.get('acodec', ''),
+                    'fps': f.get('fps', 0),
+                    'tbr': f.get('tbr', 0),  # Total bitrate
+                    'protocol': f.get('protocol', ''),
+                    'is_video_only': is_video_only
+                })
+        
+        # If no video formats found, try to get best available
+        if not formats:
+            # Look for any format with video
             for f in info.get('formats', []):
-                # Include all video formats (both with and without audio)
-                if (f.get('height') and f.get('ext') and 
-                    f.get('vcodec') and f.get('vcodec') != 'none' and
-                    f.get('height') >= 144 and  # Minimum reasonable video height
-                    f.get('protocol') != 'mhtml' and  # Skip MHTML formats
-                    not f.get('ext') in ['html', 'htm', 'mhtml'] and
-                    f.get('ext') in ['mp4', 'webm', 'mkv', 'avi', 'mov']):  # Only video formats
-                    
-                    # Check if this is video-only (no audio)
-                    is_video_only = f.get('acodec') == 'none' or not f.get('acodec')
-                    
+                if (f.get('height') and f.get('vcodec') and 
+                    f.get('vcodec') != 'none' and f.get('height') >= 144 and
+                    f.get('protocol') != 'mhtml'):
                     formats.append({
                         'format_id': f.get('format_id', ''),
                         'height': f.get('height', 0),
-                        'ext': f.get('ext', ''),
+                        'ext': f.get('ext', 'mp4'),
                         'filesize': f.get('filesize', 0),
-                        'format_note': f.get('format_note', ''),
+                        'format_note': f.get('format_note', 'Video format'),
                         'vcodec': f.get('vcodec', ''),
                         'acodec': f.get('acodec', ''),
                         'fps': f.get('fps', 0),
-                        'tbr': f.get('tbr', 0),  # Total bitrate
-                        'protocol': f.get('protocol', ''),
-                        'is_video_only': is_video_only
+                        'tbr': f.get('tbr', 0),
+                        'protocol': f.get('protocol', '')
                     })
-            
-            # If no video formats found, try to get best available
-            if not formats:
-                # Look for any format with video
-                for f in info.get('formats', []):
-                    if (f.get('height') and f.get('vcodec') and 
-                        f.get('vcodec') != 'none' and f.get('height') >= 144 and
-                        f.get('protocol') != 'mhtml'):
-                        formats.append({
-                            'format_id': f.get('format_id', ''),
-                            'height': f.get('height', 0),
-                            'ext': f.get('ext', 'mp4'),
-                            'filesize': f.get('filesize', 0),
-                            'format_note': f.get('format_note', 'Video format'),
-                            'vcodec': f.get('vcodec', ''),
-                            'acodec': f.get('acodec', ''),
-                            'fps': f.get('fps', 0),
-                            'tbr': f.get('tbr', 0),
-                            'protocol': f.get('protocol', '')
-                        })
-            
-            # Sort formats by height (quality) and then by bitrate
-            formats.sort(key=lambda x: (x['height'], x.get('tbr', 0)), reverse=True)
-            
-            # Remove duplicates based on height, but keep the best quality for each height
-            unique_formats = []
-            seen_heights = set()
-            for f in formats:
-                if f['height'] not in seen_heights:
-                    seen_heights.add(f['height'])
-                    unique_formats.append(f)
-            
-            # Ensure we have at least one format - use yt-dlp's best format
-            if not unique_formats:
-                unique_formats = [{
-                    'format_id': 'best[ext=mp4]/best',  # Prefer MP4, fallback to best
-                    'height': 720,
-                    'ext': 'mp4',
-                    'filesize': 0,
-                    'format_note': 'Best available quality (auto-selected)',
-                    'vcodec': 'unknown',
-                    'acodec': 'unknown',
-                    'fps': 0,
-                    'tbr': 0,
-                    'protocol': 'unknown'
-                }]
-            
-            print(f"Found {len(unique_formats)} video formats")  # Debug print
-            for f in unique_formats:
-                print(f"  - {f['height']}p {f['ext']} ({f['format_id']})")  # Debug print
-            
-            return jsonify({
-                'title': info.get('title', 'Unknown Title'),
-                'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail', ''),
-                'formats': unique_formats,
-                'video_id': extract_video_id(url)
-            })
-            
+        
+        # Sort formats by height (quality) and then by bitrate
+        formats.sort(key=lambda x: (x['height'], x.get('tbr', 0)), reverse=True)
+        
+        # Remove duplicates based on height, but keep the best quality for each height
+        unique_formats = []
+        seen_heights = set()
+        for f in formats:
+            if f['height'] not in seen_heights:
+                seen_heights.add(f['height'])
+                unique_formats.append(f)
+        
+        # Ensure we have at least one format - use yt-dlp's best format
+        if not unique_formats:
+            unique_formats = [{
+                'format_id': 'best[ext=mp4]/best',  # Prefer MP4, fallback to best
+                'height': 720,
+                'ext': 'mp4',
+                'filesize': 0,
+                'format_note': 'Best available quality (auto-selected)',
+                'vcodec': 'unknown',
+                'acodec': 'unknown',
+                'fps': 0,
+                'tbr': 0,
+                'protocol': 'unknown'
+            }]
+        
+        print(f"Found {len(unique_formats)} video formats")
+        for f in unique_formats:
+            print(f"  - {f['height']}p {f['ext']} ({f['format_id']})")
+        
+        return jsonify({
+            'title': info.get('title', 'Unknown Title'),
+            'duration': info.get('duration', 0),
+            'thumbnail': info.get('thumbnail', ''),
+            'formats': unique_formats,
+            'video_id': extract_video_id(url)
+        })
+        
     except Exception as e:
-        print(f"Error in get_video_info: {str(e)}")  # Debug print
-        return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
+        print(f"Error processing video info: {str(e)}")
+        return jsonify({'error': f'Error processing video info: {str(e)}'}), 500
 
 @app.route('/download_video', methods=['POST'])
 def download_video():
@@ -583,6 +928,125 @@ def debug_formats():
             
     except Exception as e:
         return jsonify({'error': f'Debug error: {str(e)}'}), 500
+
+@app.route('/test_auth_bypass')
+def test_auth_bypass():
+    """Test authentication bypass methods"""
+    try:
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+        
+        print(f"[Auth Test] Testing authentication bypass with URL: {test_url}")
+        
+        # Test 1: Standard method
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.youtube.com/',
+                },
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(test_url, download=False)
+                if info and info.get('title'):
+                    print(f"[Auth Test] Standard method successful: {info.get('title')}")
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Authentication bypass is working',
+                        'method': 'Standard with headers',
+                        'title': info.get('title', 'Unknown'),
+                        'formats_count': len(info.get('formats', [])),
+                        'timestamp': '2024-01-18'
+                    })
+        except Exception as e:
+            print(f"[Auth Test] Standard method failed: {str(e)}")
+        
+        # Test 2: Mobile user agent
+        try:
+            mobile_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.youtube.com/',
+                },
+            }
+            
+            with yt_dlp.YoutubeDL(mobile_opts) as ydl:
+                info = ydl.extract_info(test_url, download=False)
+                if info and info.get('title'):
+                    print(f"[Auth Test] Mobile method successful: {info.get('title')}")
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Mobile authentication bypass is working',
+                        'method': 'Mobile user agent',
+                        'title': info.get('title', 'Unknown'),
+                        'formats_count': len(info.get('formats', [])),
+                        'timestamp': '2024-01-18'
+                    })
+        except Exception as e:
+            print(f"[Auth Test] Mobile method failed: {str(e)}")
+        
+        # Test 3: Linux user agent
+        try:
+            linux_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'user_agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Referer': 'https://www.youtube.com/',
+                },
+            }
+            
+            with yt_dlp.YoutubeDL(linux_opts) as ydl:
+                info = ydl.extract_info(test_url, download=False)
+                if info and info.get('title'):
+                    print(f"[Auth Test] Linux method successful: {info.get('title')}")
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Linux authentication bypass is working',
+                        'method': 'Linux user agent',
+                        'title': info.get('title', 'Unknown'),
+                        'formats_count': len(info.get('formats', [])),
+                        'timestamp': '2024-01-18'
+                    })
+        except Exception as e:
+            print(f"[Auth Test] Linux method failed: {str(e)}")
+        
+        return jsonify({
+            'status': 'failed',
+            'message': 'All authentication bypass methods failed',
+            'methods_tried': ['Standard', 'Mobile', 'Linux'],
+            'suggestion': 'YouTube may have updated their anti-bot measures',
+            'timestamp': '2024-01-18'
+        }), 500
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': '2024-01-18'
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
