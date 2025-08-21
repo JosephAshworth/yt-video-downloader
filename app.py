@@ -86,20 +86,50 @@ def index():
 def test():
     """Simple test route to check if the app is working"""
     try:
-        return jsonify({
-            'status': 'ok',
-            'message': 'YouTube Downloader is running',
+        import sys
+        import platform
+        
+        # Get Flask version safely
+        try:
+            import flask
+            flask_version = flask.__version__
+        except AttributeError:
+            flask_version = "Unknown (newer Flask version)"
+        
+        debug_info = {
+            'server_status': 'running',
             'timestamp': '2024-01-18',
             'environment': {
-                'python_version': os.sys.version,
-                'yt_dlp_version': yt_dlp.version.__version__,
-                'flask_version': Flask.__version__,
+                'python_version': sys.version,
+                'python_executable': sys.executable,
+                'platform': platform.platform(),
+                'architecture': platform.architecture(),
+                'machine': platform.machine(),
+                'processor': platform.processor(),
                 'working_directory': os.getcwd(),
                 'downloads_folder': UPLOAD_FOLDER,
                 'downloads_exists': os.path.exists(UPLOAD_FOLDER),
-                'downloads_writable': os.access(UPLOAD_FOLDER, os.W_OK) if os.path.exists(UPLOAD_FOLDER) else False
+                'downloads_writable': os.access(UPLOAD_FOLDER, os.W_OK) if os.path.exists(UPLOAD_FOLDER) else False,
+                'downloads_contents': os.listdir(UPLOAD_FOLDER) if os.path.exists(UPLOAD_FOLDER) else []
+            },
+            'dependencies': {
+                'yt_dlp_version': yt_dlp.version.__version__,
+                'flask_version': flask_version,
+                'yt_dlp_available': 'yt_dlp' in sys.modules,
+                'flask_available': 'flask' in sys.modules
+            },
+            'deployment': {
+                'is_production': IS_PRODUCTION,
+                'is_render': IS_RENDER,
+                'is_heroku': IS_HEROKU,
+                'flask_env': os.environ.get('FLASK_ENV'),
+                'port': os.environ.get('PORT'),
+                'host': os.environ.get('HOST', '0.0.0.0')
             }
-        })
+        }
+        
+        return jsonify(debug_info)
+        
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -147,6 +177,13 @@ def debug():
         import sys
         import platform
         
+        # Get Flask version safely
+        try:
+            import flask
+            flask_version = flask.__version__
+        except AttributeError:
+            flask_version = "Unknown (newer Flask version)"
+        
         debug_info = {
             'server_status': 'running',
             'timestamp': '2024-01-18',
@@ -165,7 +202,7 @@ def debug():
             },
             'dependencies': {
                 'yt_dlp_version': yt_dlp.version.__version__,
-                'flask_version': Flask.__version__,
+                'flask_version': flask_version,
                 'yt_dlp_available': 'yt_dlp' in sys.modules,
                 'flask_available': 'flask' in sys.modules
             },
@@ -213,7 +250,14 @@ def get_video_info():
         print(f"[DEBUG] Python version: {os.sys.version}")
         print(f"[DEBUG] Current working directory: {os.getcwd()}")
         print(f"[DEBUG] yt-dlp version: {yt_dlp.version.__version__}")
-        print(f"[DEBUG] Flask version: {Flask.__version__}")
+        
+        # Get Flask version safely
+        try:
+            import flask
+            flask_version = flask.__version__
+        except AttributeError:
+            flask_version = "Unknown (newer Flask version)"
+        print(f"[DEBUG] Flask version: {flask_version}")
         
         # Check if downloads folder exists and is writable
         try:
