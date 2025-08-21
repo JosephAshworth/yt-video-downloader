@@ -739,52 +739,122 @@ def get_video_info_alternative():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        print(f"[Alternative] Trying Invidious API first...")
+        print(f"[Alternative] Trying multiple alternative methods...")
         
-        # Try Invidious first (most reliable alternative)
-        info, error = extract_video_info_invidious(url)
-        if info and not error:
-            print(f"[Alternative] Invidious API successful: {len(info.get('formats', []))} formats")
-            return jsonify({
-                'title': info.get('title', 'Unknown Title'),
-                'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail', ''),
-                'formats': info.get('formats', []),
-                'video_id': info.get('video_id'),
-                'method': 'Invidious API',
-                'warning': 'Using alternative method - some features may be limited'
-            })
+        # Method 1: Try Invidious API first (most reliable when working)
+        try:
+            print(f"[Alternative] Method 1: Trying Invidious API...")
+            info, error = extract_video_info_invidious(url)
+            if info and not error:
+                print(f"[Alternative] Invidious API successful: {len(info.get('formats', []))} formats")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'formats': info.get('formats', []),
+                    'video_id': info.get('video_id'),
+                    'method': 'Invidious API',
+                    'warning': 'Using alternative method - no authentication required'
+                })
+        except Exception as e:
+            print(f"[Alternative] Invidious API failed: {str(e)}")
         
-        print(f"[Alternative] Invidious failed, trying direct YouTube extraction...")
+        # Method 2: Try Pytube (pure Python, reliable)
+        try:
+            print(f"[Alternative] Method 2: Trying Pytube...")
+            info, error = extract_video_info_pytube(url)
+            if info and not error:
+                print(f"[Alternative] Pytube successful: {len(info.get('formats', []))} formats")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'formats': info.get('formats', []),
+                    'video_id': info.get('video_id'),
+                    'method': 'Pytube',
+                    'warning': 'Using Pytube method - no authentication required'
+                })
+        except Exception as e:
+            print(f"[Alternative] Pytube failed: {str(e)}")
         
-        # Fallback to direct YouTube extraction
-        info, error = extract_video_info_direct(url)
-        if info and not error:
-            # Create a basic format list since direct extraction doesn't give formats
-            basic_formats = [
-                {
-                    'format_id': 'best',
-                    'height': 720,
-                    'ext': 'mp4',
-                    'format_note': 'Best available (direct extraction)',
-                    'method': 'Direct',
-                    'url': None  # No direct URL available
-                }
-            ]
-            
-            print(f"[Alternative] Direct YouTube extraction successful")
-            return jsonify({
-                'title': info.get('title', 'Unknown Title'),
-                'duration': 0,
-                'thumbnail': info.get('thumbnail_url', ''),
-                'formats': basic_formats,
-                'video_id': info.get('video_id'),
-                'method': 'Direct YouTube',
-                'warning': 'Using basic extraction - limited format options'
-            })
+        # Method 3: Try Direct Streams (parsing YouTube page)
+        try:
+            print(f"[Alternative] Method 3: Trying Direct Streams...")
+            info, error = extract_video_info_direct_streams(url)
+            if info and not error:
+                print(f"[Alternative] Direct Streams successful: {len(info.get('formats', []))} formats")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'formats': info.get('formats', []),
+                    'video_id': info.get('video_id'),
+                    'method': 'Direct Streams',
+                    'warning': 'Using Direct Streams method - no authentication required'
+                })
+        except Exception as e:
+            print(f"[Alternative] Direct Streams failed: {str(e)}")
+        
+        # Method 4: Try YouTube-DL Legacy (different authentication)
+        try:
+            print(f"[Alternative] Method 4: Trying YouTube-DL Legacy...")
+            info, error = extract_video_info_youtube_dl_legacy(url)
+            if info and not error:
+                print(f"[Alternative] YouTube-DL Legacy successful: {len(info.get('formats', []))} formats")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'formats': info.get('formats', []),
+                    'video_id': info.get('video_id'),
+                    'method': 'YouTube-DL Legacy',
+                    'warning': 'Using YouTube-DL Legacy method - may have different authentication'
+                })
+        except Exception as e:
+            print(f"[Alternative] YouTube-DL Legacy failed: {str(e)}")
+        
+        # Method 5: Try direct YouTube extraction (basic info only)
+        try:
+            print(f"[Alternative] Method 5: Trying Direct YouTube extraction...")
+            info, error = extract_video_info_direct(url)
+            if info and not error:
+                # Create a basic format list since direct extraction doesn't give formats
+                basic_formats = [
+                    {
+                        'format_id': 'best',
+                        'height': 720,
+                        'ext': 'mp4',
+                        'format_note': 'Best available (direct extraction)',
+                        'method': 'Direct',
+                        'url': None  # No direct URL available
+                    }
+                ]
+                
+                print(f"[Alternative] Direct YouTube extraction successful (basic info only)")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': 0,
+                    'thumbnail': info.get('thumbnail_url', ''),
+                    'formats': basic_formats,
+                    'video_id': info.get('video_id'),
+                    'method': 'Direct YouTube',
+                    'warning': 'Using basic extraction - limited format options'
+                })
+        except Exception as e:
+            print(f"[Alternative] Direct YouTube extraction failed: {str(e)}")
         
         print(f"[Alternative] All alternative methods failed")
-        return jsonify({'error': 'All alternative methods failed. Please try again later.'}), 500
+        return jsonify({
+            'error': 'All alternative methods failed. Please try again later.',
+            'methods_tried': [
+                'Invidious API',
+                'Pytube',
+                'Direct Streams', 
+                'YouTube-DL Legacy',
+                'Direct YouTube extraction'
+            ],
+            'suggestion': 'Try using the main route with yt-dlp as fallback'
+        }), 500
         
     except Exception as e:
         print(f"[Alternative] Error in get_video_info_alternative: {str(e)}")
@@ -1427,6 +1497,371 @@ def test_invidious():
             'error_type': str(type(e)),
             'timestamp': '2024-01-18'
         }), 500
+
+def extract_video_info_pytube(url):
+    """Extract video info using pytube library"""
+    try:
+        from pytube import YouTube
+        
+        print(f"[Pytube] Attempting to extract info from: {url}")
+        yt = YouTube(url)
+        
+        # Get available streams
+        streams = []
+        
+        # Progressive streams (video + audio combined)
+        for stream in yt.streams.filter(progressive=True):
+            streams.append({
+                'format_id': f"pytube_{stream.itag}",
+                'height': stream.resolution_height or 0,
+                'ext': stream.subtype,
+                'url': stream.url,
+                'filesize': stream.filesize or 0,
+                'format_note': f"Pytube {stream.resolution} (Progressive)",
+                'method': 'Pytube',
+                'itag': stream.itag
+            })
+        
+        # Video-only streams (higher quality)
+        for stream in yt.streams.filter(only_video=True):
+            streams.append({
+                'format_id': f"pytube_{stream.itag}",
+                'height': stream.resolution_height or 0,
+                'ext': stream.subtype,
+                'url': stream.url,
+                'filesize': stream.filesize or 0,
+                'format_note': f"Pytube {stream.resolution} (Video Only)",
+                'method': 'Pytube',
+                'itag': stream.itag
+            })
+        
+        # Sort by quality
+        streams.sort(key=lambda x: x['height'], reverse=True)
+        
+        print(f"[Pytube] Found {len(streams)} streams")
+        
+        return {
+            'title': yt.title,
+            'duration': yt.length,
+            'thumbnail': yt.thumbnail_url,
+            'formats': streams,
+            'video_id': extract_video_id(url),
+            'method': 'Pytube'
+        }, None
+        
+    except Exception as e:
+        print(f"[Pytube] Error: {str(e)}")
+        return None, f"Pytube error: {str(e)}"
+
+def extract_video_info_youtube_dl_legacy(url):
+    """Extract video info using legacy youtube-dl"""
+    try:
+        import youtube_dl
+        
+        print(f"[YouTube-DL Legacy] Attempting to extract info from: {url}")
+        
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': 'https://www.youtube.com/',
+            }
+        }
+        
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            formats = []
+            for f in info.get('formats', []):
+                if (f.get('height') and f.get('ext') and 
+                    f.get('vcodec') and f.get('vcodec') != 'none' and
+                    f.get('height') >= 144 and
+                    f.get('protocol') != 'mhtml' and
+                    not f.get('ext') in ['html', 'htm', 'mhtml'] and
+                    f.get('ext') in ['mp4', 'webm', 'mkv', 'avi', 'mov']):
+                    
+                    formats.append({
+                        'format_id': f.get('format_id', ''),
+                        'height': f.get('height', 0),
+                        'ext': f.get('ext', ''),
+                        'filesize': f.get('filesize', 0),
+                        'format_note': f.get('format_note', ''),
+                        'vcodec': f.get('vcodec', ''),
+                        'acodec': f.get('acodec', ''),
+                        'fps': f.get('fps', 0),
+                        'tbr': f.get('tbr', 0),
+                        'protocol': f.get('protocol', ''),
+                        'is_video_only': f.get('acodec') == 'none' or not f.get('acodec'),
+                        'url': f.get('url', ''),
+                        'method': 'YouTube-DL Legacy'
+                    })
+            
+            # Sort by quality
+            formats.sort(key=lambda x: x['height'], reverse=True)
+            
+            print(f"[YouTube-DL Legacy] Found {len(formats)} formats")
+            
+            return {
+                'title': info.get('title', 'Unknown Title'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', ''),
+                'formats': formats,
+                'video_id': extract_video_id(url),
+                'method': 'YouTube-DL Legacy'
+            }, None
+            
+    except ImportError:
+        print("[YouTube-DL Legacy] youtube-dl not installed")
+        return None, "YouTube-DL not available"
+    except Exception as e:
+        print(f"[YouTube-DL Legacy] Error: {str(e)}")
+        return None, f"YouTube-DL error: {str(e)}"
+
+def extract_video_info_direct_streams(url):
+    """Extract video info by parsing YouTube page for direct stream URLs"""
+    try:
+        video_id = extract_video_id(url)
+        if not video_id:
+            return None, "Invalid YouTube URL"
+        
+        print(f"[Direct Streams] Attempting to extract streams from: {url}")
+        
+        # Get the YouTube page
+        page_url = f"https://www.youtube.com/watch?v={video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.youtube.com/',
+        }
+        
+        response = requests.get(page_url, headers=headers, timeout=30)
+        if not response.ok:
+            return None, f"Failed to fetch YouTube page: {response.status_code}"
+        
+        html_content = response.text
+        
+        # Try to extract player response
+        player_response_match = re.search(r'var ytInitialPlayerResponse = ({.*?});', html_content)
+        if not player_response_match:
+            return None, "Could not find player response"
+        
+        try:
+            player_response = json.loads(player_response_match.group(1))
+        except json.JSONDecodeError:
+            return None, "Invalid player response JSON"
+        
+        # Extract video details
+        video_details = player_response.get('videoDetails', {})
+        streaming_data = player_response.get('streamingData', {})
+        
+        title = video_details.get('title', 'Unknown Title')
+        duration = video_details.get('lengthSeconds', 0)
+        thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+        
+        # Extract formats
+        formats = []
+        
+        # Progressive formats (video + audio)
+        if 'formats' in streaming_data:
+            for fmt in streaming_data['formats']:
+                if (fmt.get('height') and fmt.get('url') and 
+                    fmt.get('height') >= 144):
+                    formats.append({
+                        'format_id': f"stream_{fmt.get('itag', 'unknown')}",
+                        'height': fmt.get('height', 0),
+                        'ext': 'mp4',
+                        'url': fmt.get('url'),
+                        'filesize': fmt.get('contentLength', 0),
+                        'format_note': f"Direct Stream {fmt.get('height')}p",
+                        'method': 'Direct Streams',
+                        'itag': fmt.get('itag', 'unknown')
+                    })
+        
+        # Adaptive formats (video only, higher quality)
+        if 'adaptiveFormats' in streaming_data:
+            for fmt in streaming_data['adaptiveFormats']:
+                if (fmt.get('height') and fmt.get('url') and 
+                    fmt.get('height') >= 144 and
+                    fmt.get('mimeType', '').startswith('video/')):
+                    formats.append({
+                        'format_id': f"adaptive_{fmt.get('itag', 'unknown')}",
+                        'height': fmt.get('height', 0),
+                        'ext': 'mp4',
+                        'url': fmt.get('url'),
+                        'filesize': fmt.get('contentLength', 0),
+                        'format_note': f"Adaptive Stream {fmt.get('height')}p (Video Only)",
+                        'method': 'Direct Streams',
+                        'itag': fmt.get('itag', 'unknown')
+                    })
+        
+        # Sort by quality
+        formats.sort(key=lambda x: x['height'], reverse=True)
+        
+        print(f"[Direct Streams] Found {len(formats)} formats")
+        
+        return {
+            'title': title,
+            'duration': int(duration) if duration else 0,
+            'thumbnail': thumbnail,
+            'formats': formats,
+            'video_id': video_id,
+            'method': 'Direct Streams'
+        }, None
+        
+    except Exception as e:
+        print(f"[Direct Streams] Error: {str(e)}")
+        return None, f"Direct streams error: {str(e)}"
+
+@app.route('/test_all_methods')
+def test_all_methods():
+    """Test all available video extraction methods"""
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+    
+    results = []
+    
+    # Test 1: Invidious API
+    try:
+        info, error = extract_video_info_invidious(test_url)
+        if error:
+            results.append({
+                'method': 'Invidious API',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Invidious API',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'formats': len(info.get('formats', [])),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Invidious API',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Test 2: Pytube
+    try:
+        info, error = extract_video_info_pytube(test_url)
+        if error:
+            results.append({
+                'method': 'Pytube',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Pytube',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'formats': len(info.get('formats', [])),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Pytube',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Test 3: Direct Streams
+    try:
+        info, error = extract_video_info_direct_streams(test_url)
+        if error:
+            results.append({
+                'method': 'Direct Streams',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Direct Streams',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'formats': len(info.get('formats', [])),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Direct Streams',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Test 4: YouTube-DL Legacy
+    try:
+        info, error = extract_video_info_youtube_dl_legacy(test_url)
+        if error:
+            results.append({
+                'method': 'YouTube-DL Legacy',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'YouTube-DL Legacy',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'formats': len(info.get('formats', [])),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'YouTube-DL Legacy',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Test 5: Direct YouTube
+    try:
+        info, error = extract_video_info_direct(test_url)
+        if error:
+            results.append({
+                'method': 'Direct YouTube',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Direct YouTube',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Direct YouTube',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Count successful methods
+    successful_methods = [r for r in results if r['success']]
+    
+    return jsonify({
+        'status': 'ok',
+        'message': f'Tested {len(results)} methods, {len(successful_methods)} successful',
+        'test_url': test_url,
+        'results': results,
+        'summary': {
+            'total_methods': len(results),
+            'successful_methods': len(successful_methods),
+            'failed_methods': len(results) - len(successful_methods),
+            'success_rate': f"{(len(successful_methods) / len(results) * 100):.1f}%"
+        },
+        'timestamp': '2024-01-18'
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
