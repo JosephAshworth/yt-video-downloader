@@ -15,38 +15,10 @@
                 <i class="fab fa-youtube"></i>
                 <h1>YouTube Downloader</h1>
             </div>
-            <div class="header-right">
-                <div class="user-info">
-                    <span id="username"></span>
-                    <div class="user-menu">
-                        <a href="{{ url_for('upload_cookies') }}" class="menu-item">
-                            <i class="fas fa-cookie-bite"></i>
-                            Upload Cookies
-                        </a>
-                        <a href="{{ url_for('logout') }}" class="menu-item">
-                            <i class="fas fa-sign-out-alt"></i>
-                            Logout
-                        </a>
-                    </div>
-                </div>
-                <div class="header-links">
-                    <a href="{{ url_for('direct_download') }}" class="direct-link">
-                        <i class="fas fa-unlock"></i>
-                        Try Direct Method
-                    </a>
-                </div>
-            </div>
             <p class="subtitle">Download YouTube videos easily and quickly</p>
         </header>
 
         <main class="main-content">
-            <div class="cookie-status" id="cookieStatus">
-                <div class="status-indicator">
-                    <i class="fas fa-cookie-bite"></i>
-                    <span id="cookieStatusText">Checking cookie status...</span>
-                </div>
-            </div>
-
             <div class="input-section">
                 <div class="url-input-container">
                     <input type="text" id="videoUrl" placeholder="Enter YouTube video URL here..." class="url-input">

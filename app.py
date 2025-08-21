@@ -1,5 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, flash
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask import Flask, render_template, request, jsonify, send_file
 import yt_dlp
 import os
 import re
@@ -7,67 +6,16 @@ import tempfile
 import random
 import time
 import json
-import hashlib
+import requests
 from urllib.parse import urlparse, parse_qs
 import subprocess
-from werkzeug.security import generate_password_hash, check_password_hash
-import requests
-import re
-import json
-import base64
-import urllib.parse
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
 
-# Configure Flask-Login
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
-
-# Configure folders
+# Configure upload folder
 UPLOAD_FOLDER = 'downloads'
-COOKIES_FOLDER = 'cookies'
-USERS_FOLDER = 'users'
-
-for folder in [UPLOAD_FOLDER, COOKIES_FOLDER, USERS_FOLDER]:
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-# Simple user class for authentication
-class User(UserMixin):
-    def __init__(self, user_id, username, cookies_file=None):
-        self.id = user_id
-        self.username = username
-        self.cookies_file = cookies_file
-
-# In-memory user storage (in production, use a database)
-users = {}
-
-@login_manager.user_loader
-def load_user(user_id):
-    return users.get(user_id)
-
-def save_user_data():
-    """Save user data to file"""
-    user_data = {}
-    for user_id, user in users.items():
-        user_data[user_id] = {
-            'username': user.username,
-            'cookies_file': user.cookies_file
-        }
-    
-    with open(os.path.join(USERS_FOLDER, 'users.json'), 'w') as f:
-        json.dump(user_data, f)
-
-def load_user_data():
-    """Load user data from file"""
-    users_file = os.path.join(USERS_FOLDER, 'users.json')
-    if os.path.exists(users_file):
-        with open(users_file, 'r') as f:
-            user_data = json.load(f)
-            for user_id, data in user_data.items():
-                users[user_id] = User(user_id, data['username'], data.get('cookies_file'))
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 def is_valid_youtube_url(url):
     """Check if the URL is a valid YouTube URL"""
@@ -269,6 +217,177 @@ def get_yt_dlp_options_with_advanced_bot_avoidance():
         }
     }
 
+def extract_video_info_direct(url):
+    """Extract video info directly from YouTube without yt-dlp"""
+    try:
+        video_id = extract_video_id(url)
+        if not video_id:
+            return None, "Invalid YouTube URL"
+        
+        # Method 1: Try to get info from YouTube's oEmbed API
+        oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+        headers = {
+            'User-Agent': get_random_user_agent(),
+            'Accept': 'application/json',
+            'Referer': 'https://www.youtube.com/',
+        }
+        
+        response = requests.get(oembed_url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            oembed_data = response.json()
+            return {
+                'title': oembed_data.get('title', 'Unknown Title'),
+                'author_name': oembed_data.get('author_name', 'Unknown'),
+                'thumbnail_url': oembed_data.get('thumbnail_url', ''),
+                'video_id': video_id,
+                'method': 'oEmbed API'
+            }, None
+        
+        # Method 2: Try to extract from page HTML
+        page_url = f"https://www.youtube.com/watch?v={video_id}"
+        headers = {
+            'User-Agent': get_random_user_agent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.youtube.com/',
+        }
+        
+        response = requests.get(page_url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            html_content = response.text
+            
+            # Try to extract title from HTML
+            title_match = re.search(r'<title>(.*?)</title>', html_content)
+            title = title_match.group(1).replace(' - YouTube', '') if title_match else 'Unknown Title'
+            
+            # Try to extract thumbnail
+            thumbnail_match = re.search(r'"thumbnailUrl":"([^"]+)"', html_content)
+            thumbnail = thumbnail_match.group(1) if thumbnail_match else f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+            
+            return {
+                'title': title,
+                'author_name': 'Unknown',
+                'thumbnail_url': thumbnail,
+                'video_id': video_id,
+                'method': 'HTML extraction'
+            }, None
+        
+        return None, "Could not extract video info"
+        
+    except Exception as e:
+        return None, f"Error extracting video info: {str(e)}"
+
+def get_invidious_instances():
+    """Get list of working Invidious instances"""
+    try:
+        # Try to get instances from invidious.io
+        response = requests.get('https://api.invidious.io/instances.json', timeout=10)
+        if response.status_code == 200:
+            instances = response.json()
+            # Filter for working instances
+            working_instances = [
+                instance['uri'] for instance in instances 
+                if instance.get('type') == 'https' and 
+                instance.get('monitoring', {}).get('status') == 'healthy'
+            ]
+            return working_instances[:5]  # Return top 5 working instances
+    except:
+        pass
+    
+    # Fallback instances
+    return [
+        'https://invidious.projectsegfau.lt',
+        'https://invidious.slipfox.xyz',
+        'https://invidious.prvcypwn.com',
+        'https://invidious.snopyta.org',
+        'https://invidious.kavin.rocks'
+    ]
+
+def extract_video_info_invidious(url):
+    """Extract video info using Invidious API"""
+    video_id = extract_video_id(url)
+    if not video_id:
+        return None, "Invalid YouTube URL"
+    
+    instances = get_invidious_instances()
+    
+    for instance in instances:
+        try:
+            api_url = f"{instance}/api/v1/videos/{video_id}"
+            headers = {
+                'User-Agent': get_random_user_agent(),
+                'Accept': 'application/json',
+            }
+            
+            response = requests.get(api_url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Get available formats
+                formats = []
+                if 'formatStreams' in data:
+                    for fmt in data['formatStreams']:
+                        if fmt.get('height') and fmt.get('url'):
+                            formats.append({
+                                'format_id': fmt.get('itag', 'unknown'),
+                                'height': fmt.get('height', 0),
+                                'ext': 'mp4',
+                                'url': fmt.get('url'),
+                                'filesize': fmt.get('contentLength', 0),
+                                'format_note': f"Invidious {fmt.get('height')}p",
+                                'method': 'Invidious'
+                            })
+                
+                # Sort by quality
+                formats.sort(key=lambda x: x['height'], reverse=True)
+                
+                return {
+                    'title': data.get('title', 'Unknown Title'),
+                    'duration': data.get('lengthSeconds', 0),
+                    'thumbnail': data.get('videoThumbnails', [{}])[0].get('url', ''),
+                    'formats': formats,
+                    'video_id': video_id,
+                    'method': 'Invidious API'
+                }, None
+                
+        except Exception as e:
+            print(f"Invidious instance {instance} failed: {str(e)}")
+            continue
+    
+    return None, "All Invidious instances failed"
+
+def download_video_direct(url, format_info, output_path):
+    """Download video directly using the stream URL"""
+    try:
+        headers = {
+            'User-Agent': get_random_user_agent(),
+            'Accept': '*/*',
+            'Referer': 'https://www.youtube.com/',
+        }
+        
+        response = requests.get(url, headers=headers, stream=True, timeout=300)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        with open(output_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Progress logging
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        if downloaded % (1024 * 1024) == 0:  # Log every MB
+                            print(f"Downloaded: {downloaded / (1024 * 1024):.1f}MB / {total_size / (1024 * 1024):.1f}MB ({progress:.1f}%)")
+        
+        return True, "Download completed successfully"
+        
+    except Exception as e:
+        return False, f"Download error: {str(e)}"
+
 def convert_mp4_to_mov(input_file):
     """Convert MP4 file to MOV format using FFmpeg"""
     try:
@@ -334,31 +453,7 @@ def test_youtube_access():
     
     results = []
     
-    # Test 1: Direct stream extraction (no yt-dlp, no cookies)
-    try:
-        video_info, error = extract_video_streams_direct(test_url)
-        if error:
-            results.append({
-                'method': 'Direct Stream Extraction',
-                'success': False,
-                'error': error
-            })
-        else:
-            results.append({
-                'method': 'Direct Stream Extraction',
-                'success': True,
-                'title': video_info.get('title', 'Unknown'),
-                'duration': video_info.get('duration', 0),
-                'formats': len(video_info.get('formats', []))
-            })
-    except Exception as e:
-        results.append({
-            'method': 'Direct Stream Extraction',
-            'success': False,
-            'error': str(e)
-        })
-    
-    # Test 2: Basic yt-dlp approach
+    # Test 1: Basic yt-dlp approach
     try:
         basic_opts = {
             'quiet': True,
@@ -380,7 +475,7 @@ def test_youtube_access():
             'error': str(e)
         })
     
-    # Test 3: Advanced bot avoidance
+    # Test 2: Advanced bot avoidance
     try:
         advanced_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
         advanced_opts['extract_flat'] = True
@@ -399,6 +494,53 @@ def test_youtube_access():
             'error': str(e)
         })
     
+    # Test 3: Direct YouTube extraction
+    try:
+        info, error = extract_video_info_direct(test_url)
+        if error:
+            results.append({
+                'method': 'Direct YouTube',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Direct YouTube',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Direct YouTube',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Test 4: Invidious API
+    try:
+        info, error = extract_video_info_invidious(test_url)
+        if error:
+            results.append({
+                'method': 'Invidious API',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Invidious API',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'formats': len(info.get('formats', [])),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Invidious API',
+            'success': False,
+            'error': str(e)
+        })
+    
     return jsonify({
         'status': 'ok',
         'message': 'YouTube access test results',
@@ -406,116 +548,199 @@ def test_youtube_access():
         'timestamp': '2024-01-18'
     })
 
-@app.route('/auth_status')
-def auth_status():
-    """Check authentication status"""
-    if current_user.is_authenticated:
-        return jsonify({
-            'authenticated': True,
-            'username': current_user.username,
-            'has_cookies': bool(current_user.cookies_file and os.path.exists(current_user.cookies_file)),
-            'cookies_file': current_user.cookies_file
+@app.route('/test_alternative_methods')
+def test_alternative_methods():
+    """Test only alternative methods (no yt-dlp)"""
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+    
+    results = []
+    
+    # Test 1: Direct YouTube extraction
+    try:
+        info, error = extract_video_info_direct(test_url)
+        if error:
+            results.append({
+                'method': 'Direct YouTube',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Direct YouTube',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Direct YouTube',
+            'success': False,
+            'error': str(e)
         })
-    else:
-        return jsonify({
-            'authenticated': False,
-            'message': 'User not authenticated'
+    
+    # Test 2: Invidious API
+    try:
+        info, error = extract_video_info_invidious(test_url)
+        if error:
+            results.append({
+                'method': 'Invidious API',
+                'success': False,
+                'error': error
+            })
+        else:
+            results.append({
+                'method': 'Invidious API',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'formats': len(info.get('formats', [])),
+                'method_used': info.get('method', 'Unknown')
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Invidious API',
+            'success': False,
+            'error': str(e)
         })
+    
+    return jsonify({
+        'status': 'ok',
+        'message': 'Alternative methods test results (no yt-dlp)',
+        'results': results,
+        'timestamp': '2024-01-18'
+    })
 
-@app.route('/direct')
-def direct_download():
-    """Direct download page (no authentication required)"""
-    return render_template('direct_download.html')
+@app.route('/get_video_info_alternative', methods=['POST'])
+def get_video_info_alternative():
+    """Get video info using alternative methods (no yt-dlp)"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({'error': 'Please provide a YouTube URL'}), 400
+        
+        if not is_valid_youtube_url(url):
+            return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
+        
+        # Try Invidious first (most reliable alternative)
+        info, error = extract_video_info_invidious(url)
+        if info and not error:
+            return jsonify({
+                'title': info.get('title', 'Unknown Title'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', ''),
+                'formats': info.get('formats', []),
+                'video_id': info.get('video_id'),
+                'method': 'Invidious API',
+                'warning': 'Using alternative method - some features may be limited'
+            })
+        
+        # Fallback to direct YouTube extraction
+        info, error = extract_video_info_direct(url)
+        if info and not error:
+            # Create a basic format list since direct extraction doesn't give formats
+            basic_formats = [
+                {
+                    'format_id': 'best',
+                    'height': 720,
+                    'ext': 'mp4',
+                    'format_note': 'Best available (direct extraction)',
+                    'method': 'Direct'
+                }
+            ]
+            
+            return jsonify({
+                'title': info.get('title', 'Unknown Title'),
+                'duration': 0,
+                'thumbnail': info.get('thumbnail_url', ''),
+                'formats': basic_formats,
+                'video_id': info.get('video_id'),
+                'method': 'Direct YouTube',
+                'warning': 'Using basic extraction - limited format options'
+            })
+        
+        return jsonify({'error': 'All alternative methods failed. Please try again later.'}), 500
+        
+    except Exception as e:
+        print(f"Error in get_video_info_alternative: {str(e)}")
+        return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
+
+@app.route('/download_video_alternative', methods=['POST'])
+def download_video_alternative():
+    """Download video using alternative methods (no yt-dlp)"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        format_id = data.get('format_id', 'best')
+        
+        if not url:
+            return jsonify({'error': 'Please provide a YouTube URL'}), 400
+        
+        if not is_valid_youtube_url(url):
+            return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
+        
+        # Try Invidious first
+        info, error = extract_video_info_invidious(url)
+        if info and not error:
+            # Find the requested format
+            selected_format = None
+            for fmt in info.get('formats', []):
+                if str(fmt.get('format_id')) == str(format_id) or format_id == 'best':
+                    selected_format = fmt
+                    if format_id == 'best':
+                        break  # Use first (highest quality) format
+            
+            if selected_format and selected_format.get('url'):
+                # Generate filename
+                safe_title = "".join(c for c in info.get('title', 'Unknown') if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                filename = f"{safe_title}_{selected_format.get('height', 'unknown')}p.mp4"
+                output_path = os.path.join(UPLOAD_FOLDER, filename)
+                
+                # Download the video
+                success, message = download_video_direct(selected_format['url'], selected_format, output_path)
+                
+                if success:
+                    file_size = os.path.getsize(output_path)
+                    return jsonify({
+                        'success': True,
+                        'filename': filename,
+                        'filepath': output_path,
+                        'title': info.get('title', 'Unknown Title'),
+                        'filesize': file_size,
+                        'selected_quality': f"{selected_format.get('height', 'Unknown')}p",
+                        'method': 'Invidious API',
+                        'message': message
+                    })
+                else:
+                    return jsonify({'error': f'Download failed: {message}'}), 500
+            else:
+                return jsonify({'error': 'Selected format not available'}), 400
+        
+        # Fallback to direct YouTube (limited format options)
+        info, error = extract_video_info_direct(url)
+        if info and not error:
+            # For direct extraction, we can only get basic info
+            safe_title = "".join(c for c in info.get('title', 'Unknown') if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            filename = f"{safe_title}_basic.mp4"
+            output_path = os.path.join(UPLOAD_FOLDER, filename)
+            
+            return jsonify({
+                'success': False,
+                'error': 'Direct YouTube extraction only provides basic info. Please use Invidious method or try again later.',
+                'available_info': info
+            }), 400
+        
+        return jsonify({'error': 'All alternative methods failed. Please try again later.'}), 500
+        
+    except Exception as e:
+        print(f"Error in download_video_alternative: {str(e)}")
+        return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
 
 @app.route('/')
-@login_required
 def index():
     return render_template('index.html')
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        # Check if user exists
-        user = None
-        for u in users.values():
-            if u.username == username:
-                user = u
-                break
-        
-        if user and check_password_hash(user.password_hash, password):
-            login_user(user)
-            return redirect(url_for('index'))
-        else:
-            flash('Invalid username or password')
-    
-    return render_template('login.html')
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        # Check if username already exists
-        for u in users.values():
-            if u.username == username:
-                flash('Username already exists')
-                return render_template('register.html')
-        
-        # Create new user
-        user_id = str(len(users) + 1)
-        password_hash = generate_password_hash(password)
-        user = User(user_id, username)
-        user.password_hash = password_hash
-        users[user_id] = user
-        
-        save_user_data()
-        flash('Registration successful! Please log in.')
-        return redirect(url_for('login'))
-    
-    return render_template('register.html')
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
-
-@app.route('/upload_cookies', methods=['GET', 'POST'])
-@login_required
-def upload_cookies():
-    if request.method == 'POST':
-        if 'cookies_file' not in request.files:
-            flash('No file selected')
-            return redirect(request.url)
-        
-        file = request.files['cookies_file']
-        if file.filename == '':
-            flash('No file selected')
-            return redirect(request.url)
-        
-        if file and file.filename.endswith('.txt'):
-            # Save cookies file
-            filename = f"cookies_{current_user.username}.txt"
-            filepath = os.path.join(COOKIES_FOLDER, filename)
-            file.save(filepath)
-            
-            # Update user's cookies file
-            current_user.cookies_file = filepath
-            save_user_data()
-            
-            flash('Cookies uploaded successfully!')
-            return redirect(url_for('index'))
-        else:
-            flash('Please upload a .txt file')
-    
-    return render_template('upload_cookies.html')
-
 @app.route('/get_video_info', methods=['POST'])
-@login_required
 def get_video_info():
     try:
         data = request.get_json()
@@ -527,40 +752,87 @@ def get_video_info():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Check if user has cookies
-        if not current_user.cookies_file or not os.path.exists(current_user.cookies_file):
-            return jsonify({'error': 'Please upload your YouTube cookies first. Go to Upload Cookies in the menu.'}), 401
-        
-        # Use user's cookies for authentication
-        ydl_opts = {
+        # Use advanced bot avoidance techniques
+        ydl_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
+        ydl_opts.update({
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            'cookiefile': current_user.cookies_file,  # Use user's cookies
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            },
-            'nocheckcertificate': True,
-            'ignoreerrors': False,
-        }
+        })
         
-        # Extract video info using user's cookies
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-        except Exception as e:
-            print(f"Error extracting video info: {str(e)}")
-            if 'cookies' in str(e).lower() or 'authentication' in str(e).lower():
-                return jsonify({'error': 'Your cookies may have expired. Please re-upload your YouTube cookies.'}), 401
-            else:
-                return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
+        # Retry mechanism with exponential backoff for bot detection
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    break  # Success, exit retry loop
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'bot' in error_msg or 'sign in' in error_msg or '403' in error_msg:
+                    print(f"[Bot Detection] Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < max_retries - 1:
+                        print(f"[Bot Detection] Waiting {retry_delay} seconds before retry...")
+                        time.sleep(retry_delay)
+                        # Try different approach for next attempt
+                        if attempt == 1:
+                            # Second attempt: try mobile user agent
+                            ydl_opts['user_agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1'
+                            ydl_opts['http_headers'] = get_enhanced_headers_for_user_agent(ydl_opts['user_agent'])
+                        elif attempt == 2:
+                            # Third attempt: try Firefox with different approach
+                            ydl_opts['user_agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
+                            ydl_opts['http_headers'] = get_enhanced_headers_for_user_agent(ydl_opts['user_agent'])
+                            # Add different extractor args
+                            ydl_opts['extractor_args'] = {
+                                'youtube': {
+                                    'skip': ['dash'],
+                                    'player_client': ['web'],
+                                    'player_skip': ['webpage'],
+                                }
+                            }
+                        
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"[Bot Detection] All retry attempts failed, trying fallback method...")
+                        # Try one last time with minimal options
+                        try:
+                            fallback_opts = {
+                                'format': 'best[ext=mp4]/best',
+                                'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_fallback.mp4'),
+                                'quiet': True,
+                                'no_warnings': True,
+                                'user_agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                                }
+                            }
+                            
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                                info = ydl.extract_info(url, download=False)
+                                return jsonify({
+                                    'title': info.get('title', 'Unknown Title'),
+                                    'duration': info.get('duration', 0),
+                                    'thumbnail': info.get('thumbnail', ''),
+                                    'formats': [{
+                                        'format_id': 'best[ext=mp4]/best',
+                                        'height': 720,
+                                        'ext': 'mp4',
+                                        'format_note': 'Fallback format (best available)',
+                                    }],
+                                    'video_id': extract_video_id(url),
+                                    'warning': 'Using fallback method due to bot detection'
+                                })
+                        except Exception as fallback_error:
+                            print(f"[Fallback] Also failed: {str(fallback_error)}")
+                            return jsonify({'error': 'YouTube is blocking all access methods. Please try again later or use a different video.'}), 429
+                else:
+                    # Non-bot related error, don't retry
+                    raise e
         
         # Get available formats and filter for actual video formats (allow video-only for higher qualities)
             formats = []
@@ -653,7 +925,6 @@ def get_video_info():
         return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
 
 @app.route('/download_video', methods=['POST'])
-@login_required
 def download_video():
     try:
         data = request.get_json()
@@ -667,12 +938,9 @@ def download_video():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Check if user has cookies
-        if not current_user.cookies_file or not os.path.exists(current_user.cookies_file):
-            return jsonify({'error': 'Please upload your YouTube cookies first. Go to Upload Cookies in the menu.'}), 401
-        
-        # Use user's cookies for authentication
-        ydl_opts = {
+        # Use advanced bot avoidance techniques for download
+        ydl_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
+        ydl_opts.update({
             'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
             'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(format_id)s.mp4'),  # Output as MP4
             'quiet': False,  # Show more output for debugging
@@ -682,48 +950,47 @@ def download_video():
             'skip': ['storyboard', 'image'],
             'extractaudio': False,
             'audioformat': None,
-            'cookiefile': current_user.cookies_file,  # Use user's cookies
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            },
-            'nocheckcertificate': True,
-            'ignoreerrors': False,
-            'retries': 3,
-            'fragment_retries': 3,
-            'prefer_ffmpeg': True,
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }],
-        }
+        })
         
         print(f"[Download] Using format_id: {format_id}")
         print(f"[Download] Full format string: {format_id}+bestaudio/best")
         
-        # Download video using user's cookies
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # First, extract info to validate the format
-                info = ydl.extract_info(url, download=False)
-                print(f"Video title: {info.get('title', 'Unknown')}")
-                print(f"Available formats: {len(info.get('formats', []))}")
-                
-                # Download the video with the selected format
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-        except Exception as e:
-            print(f"Error downloading video: {str(e)}")
-            if 'cookies' in str(e).lower() or 'authentication' in str(e).lower():
-                return jsonify({'error': 'Your cookies may have expired. Please re-upload your YouTube cookies.'}), 401
-            else:
-                return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
+        # Retry mechanism with exponential backoff for bot detection during download
+        max_retries = 3
+        retry_delay = 3
+        
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # First, extract info to validate the format
+                    info = ydl.extract_info(url, download=False)
+                    print(f"Video title: {info.get('title', 'Unknown')}")
+                    print(f"Available formats: {len(info.get('formats', []))}")
+                    
+                    # Download the video with the selected format
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    break  # Success, exit retry loop
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'bot' in error_msg or 'sign in' in error_msg or '403' in error_msg:
+                    print(f"[Download Bot Detection] Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < max_retries - 1:
+                        print(f"[Download Bot Detection] Waiting {retry_delay} seconds before retry...")
+                        time.sleep(retry_delay)
+                        # Rotate user agent for next attempt
+                        user_agent = get_random_user_agent()
+                        headers = get_headers_for_user_agent(user_agent)
+                        ydl_opts['user_agent'] = user_agent
+                        ydl_opts['http_headers'] = headers
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"[Download Bot Detection] All retry attempts failed")
+                        return jsonify({'error': 'YouTube is blocking downloads. Please try again later or use a different video.'}), 429
+                else:
+                    # Non-bot related error, don't retry
+                    raise e
             
             print(f"[Download] Expected filename: {filename}")
             print(f"[Download] Selected format_id: {format_id}")
@@ -1072,204 +1339,7 @@ def debug_formats():
     except Exception as e:
         return jsonify({'error': f'Debug error: {str(e)}'}), 500
 
-def extract_video_streams_direct(url):
-    """Extract video streams directly from YouTube without yt-dlp"""
-    try:
-        # Get the video page
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-        }
-        
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        # Extract video info from the page
-        html_content = response.text
-        
-        # Find ytInitialPlayerResponse
-        player_response_match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?});', html_content)
-        if not player_response_match:
-            return None, "Could not find video player response"
-        
-        player_response = json.loads(player_response_match.group(1))
-        
-        # Extract video details
-        video_details = player_response.get('videoDetails', {})
-        streaming_data = player_response.get('streamingData', {})
-        
-        if not streaming_data:
-            return None, "No streaming data available"
-        
-        # Get available formats
-        formats = []
-        
-        # Add progressive formats (video + audio combined)
-        if 'formats' in streaming_data:
-            for fmt in streaming_data['formats']:
-                if fmt.get('url') and fmt.get('height'):
-                    formats.append({
-                        'format_id': fmt.get('itag', 'unknown'),
-                        'height': fmt.get('height', 0),
-                        'ext': 'mp4',
-                        'filesize': fmt.get('contentLength', 0),
-                        'format_note': f"Progressive {fmt.get('height')}p",
-                        'url': fmt.get('url'),
-                        'type': 'progressive'
-                    })
-        
-        # Add adaptive formats (separate video/audio)
-        if 'adaptiveFormats' in streaming_data:
-            for fmt in streaming_data['adaptiveFormats']:
-                if fmt.get('url') and fmt.get('height') and fmt.get('mimeType', '').startswith('video/'):
-                    formats.append({
-                        'format_id': fmt.get('itag', 'unknown'),
-                        'height': fmt.get('height', 0),
-                        'ext': 'mp4',
-                        'filesize': fmt.get('contentLength', 0),
-                        'format_note': f"Adaptive {fmt.get('height')}p",
-                        'url': fmt.get('url'),
-                        'type': 'adaptive'
-                    })
-        
-        # Sort by height
-        formats.sort(key=lambda x: x['height'], reverse=True)
-        
-        return {
-            'title': video_details.get('title', 'Unknown Title'),
-            'duration': int(video_details.get('lengthSeconds', 0)),
-            'thumbnail': f"https://i.ytimg.com/vi/{extract_video_id(url)}/maxresdefault.jpg",
-            'formats': formats,
-            'video_id': extract_video_id(url)
-        }, None
-        
-    except Exception as e:
-        return None, f"Error extracting streams: {str(e)}"
-
-def download_video_direct(url, format_id, output_path):
-    """Download video directly using the stream URL"""
-    try:
-        # First get the video info
-        video_info, error = extract_video_streams_direct(url)
-        if error:
-            return False, error
-        
-        # Find the requested format
-        selected_format = None
-        for fmt in video_info['formats']:
-            if str(fmt['format_id']) == str(format_id):
-                selected_format = fmt
-                break
-        
-        if not selected_format:
-            return False, f"Format {format_id} not found"
-        
-        # Download the video
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
-        
-        response = requests.get(selected_format['url'], headers=headers, stream=True, timeout=300)
-        response.raise_for_status()
-        
-        # Save the file
-        with open(output_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        
-        return True, "Download completed successfully"
-        
-    except Exception as e:
-        return False, f"Download error: {str(e)}"
-
-@app.route('/get_video_info_direct', methods=['POST'])
-def get_video_info_direct():
-    """Get video info using direct stream extraction"""
-    try:
-        data = request.get_json()
-        url = data.get('url', '').strip()
-        
-        if not url:
-            return jsonify({'error': 'Please provide a YouTube URL'}), 400
-        
-        if not is_valid_youtube_url(url):
-            return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
-        
-        # Extract video info directly
-        video_info, error = extract_video_streams_direct(url)
-        
-        if error:
-            return jsonify({'error': error}), 500
-        
-        return jsonify(video_info)
-        
-    except Exception as e:
-        return jsonify({'error': f'Error: {str(e)}'}), 500
-
-@app.route('/download_video_direct', methods=['POST'])
-def download_video_direct_route():
-    """Download video using direct stream extraction"""
-    try:
-        data = request.get_json()
-        url = data.get('url', '').strip()
-        format_id = data.get('format_id', 'best')
-        
-        if not url:
-            return jsonify({'error': 'Please provide a YouTube URL'}), 400
-        
-        if not is_valid_youtube_url(url):
-            return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
-        
-        # Create output filename
-        video_info, error = extract_video_streams_direct(url)
-        if error:
-            return jsonify({'error': error}), 500
-        
-        # Find the selected format
-        selected_format = None
-        for fmt in video_info['formats']:
-            if str(fmt['format_id']) == str(format_id):
-                selected_format = fmt
-                break
-        
-        if not selected_format:
-            return jsonify({'error': f'Format {format_id} not found'}), 400
-        
-        # Generate filename
-        safe_title = "".join(c for c in video_info['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        filename = f"{safe_title}_{format_id}.mp4"
-        output_path = os.path.join(UPLOAD_FOLDER, filename)
-        
-        # Download the video
-        success, message = download_video_direct(url, format_id, output_path)
-        
-        if success:
-            file_size = os.path.getsize(output_path)
-            return jsonify({
-                'success': True,
-                'filename': filename,
-                'filepath': output_path,
-                'title': video_info['title'],
-                'filesize': file_size,
-                'selected_quality': f"{selected_format['height']}p",
-                'message': message
-            })
-        else:
-            return jsonify({'error': message}), 500
-        
-    except Exception as e:
-        return jsonify({'error': f'Error: {str(e)}'}), 500
-
 if __name__ == '__main__':
-    # Load user data on startup
-    load_user_data()
-    
     # Use environment variables for production deployment
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') == 'development'

@@ -1,7 +1,6 @@
 // Global variables
 let currentVideoInfo = null;
 let selectedFormat = null;
-let currentUser = null;
 
 // DOM elements
 const videoUrlInput = document.getElementById('videoUrl');
@@ -14,9 +13,6 @@ const downloadComplete = document.getElementById('downloadComplete');
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize authentication and cookie status
-    initializeAuth();
-    
     analyzeBtn.addEventListener('click', analyzeVideo);
     videoUrlInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
@@ -366,64 +362,4 @@ document.addEventListener('DOMContentLoaded', function() {
             this.disabled = false;
         }, 5000);
     });
-});
-
-// Authentication functions
-async function initializeAuth() {
-    try {
-        const response = await fetch('/auth_status');
-        const data = await response.json();
-        
-        if (data.authenticated) {
-            currentUser = data;
-            updateUserInterface(data);
-            checkCookieStatus();
-        } else {
-            // Redirect to login if not authenticated
-            window.location.href = '/login';
-        }
-    } catch (error) {
-        console.error('Auth initialization error:', error);
-        // Redirect to login on error
-        window.location.href = '/login';
-    }
-}
-
-function updateUserInterface(userData) {
-    const usernameElement = document.getElementById('username');
-    if (usernameElement) {
-        usernameElement.textContent = userData.username;
-    }
-}
-
-async function checkCookieStatus() {
-    try {
-        const response = await fetch('/auth_status');
-        const data = await response.json();
-        
-        const cookieStatus = document.getElementById('cookieStatus');
-        const statusText = document.getElementById('cookieStatusText');
-        const statusIndicator = cookieStatus.querySelector('.status-indicator');
-        
-        if (data.has_cookies) {
-            statusText.textContent = 'Cookies loaded successfully';
-            statusIndicator.classList.add('success');
-            statusIndicator.classList.remove('error');
-        } else {
-            statusText.textContent = 'No cookies found. Please upload your YouTube cookies.';
-            statusIndicator.classList.add('error');
-            statusIndicator.classList.remove('success');
-        }
-    } catch (error) {
-        console.error('Cookie status check error:', error);
-        updateCookieStatus('Error checking cookie status', 'error');
-    }
-}
-
-function updateCookieStatus(message, type) {
-    const statusText = document.getElementById('cookieStatusText');
-    const statusIndicator = document.getElementById('cookieStatus').querySelector('.status-indicator');
-    
-    statusText.textContent = message;
-    statusIndicator.className = `status-indicator ${type}`;
-} 
+}); 
