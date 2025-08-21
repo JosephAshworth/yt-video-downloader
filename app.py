@@ -141,7 +141,12 @@ def get_invidious_instances():
         'https://invidious.slipfox.xyz',
         'https://invidious.prvcypwn.com',
         'https://invidious.snopyta.org',
-        'https://invidious.kavin.rocks'
+        'https://invidious.kavin.rocks',
+        'https://invidious.weblibre.org',
+        'https://invidious.poal.co',
+        'https://invidious.moomoo.me',
+        'https://invidious.13ad.de',
+        'https://invidious.pw'
     ]
     print(f"[Invidious] Using {len(fallback_instances)} fallback instances")
     return fallback_instances
@@ -154,21 +159,44 @@ def extract_video_info_invidious(url):
     
     instances = get_invidious_instances()
     
-    for instance in instances:
+    for i, instance in enumerate(instances):
         try:
+            print(f"[Invidious] Trying instance {i+1}/{len(instances)}: {instance}")
             api_url = f"{instance}/api/v1/videos/{video_id}"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'application/json',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': 'https://www.youtube.com/',
             }
             
+            print(f"[Invidious] Requesting: {api_url}")
             response = requests.get(api_url, headers=headers, timeout=15)
+            print(f"[Invidious] Instance {instance} returned status: {response.status_code}")
+            
             if response and response.status_code == 200:
-                data = response.json()
+                # Validate response content
+                if not response.text or response.text.strip() == '':
+                    print(f"[Invidious] Instance {instance} returned empty response")
+                    continue
+                
+                try:
+                    data = response.json()
+                except json.JSONDecodeError as json_error:
+                    print(f"[Invidious] Instance {instance} returned invalid JSON: {str(json_error)}")
+                    print(f"[Invidious] Response content: {response.text[:200]}...")
+                    continue
                 
                 # Validate required fields
-                if not isinstance(data, dict) or 'title' not in data:
+                if not isinstance(data, dict):
+                    print(f"[Invidious] Instance {instance} returned non-dict data: {type(data)}")
                     continue
+                
+                if 'title' not in data:
+                    print(f"[Invidious] Instance {instance} missing title field")
+                    continue
+                
+                print(f"[Invidious] Instance {instance} successful! Title: {data.get('title', 'Unknown')}")
                 
                 # Get available formats
                 formats = []
@@ -187,6 +215,7 @@ def extract_video_info_invidious(url):
                 
                 # Sort by quality
                 formats.sort(key=lambda x: x['height'], reverse=True)
+                print(f"[Invidious] Found {len(formats)} formats")
                 
                 # Ensure thumbnail is valid
                 thumbnail = ""
@@ -203,10 +232,26 @@ def extract_video_info_invidious(url):
                     'video_id': video_id,
                     'method': 'Invidious API'
                 }, None
+            else:
+                print(f"[Invidious] Instance {instance} returned status {response.status_code}")
+                if response.status_code == 403:
+                    print(f"[Invidious] Instance {instance} blocked (403 Forbidden)")
+                elif response.status_code == 404:
+                    print(f"[Invidious] Instance {instance} video not found (404)")
+                elif response.status_code == 429:
+                    print(f"[Invidious] Instance {instance} rate limited (429)")
+                
+        except requests.exceptions.Timeout:
+            print(f"[Invidious] Instance {instance} timed out")
+            continue
+        except requests.exceptions.ConnectionError:
+            print(f"[Invidious] Instance {instance} connection error")
+            continue
         except Exception as e:
             print(f"[Invidious] Instance {instance} failed: {str(e)}")
             continue
     
+    print(f"[Invidious] All {len(instances)} instances failed")
     return None, "All Invidious instances failed"
 
 def convert_mp4_to_mov(input_file):
@@ -1344,6 +1389,44 @@ def test_alternative_methods():
         'results': results,
         'timestamp': '2024-01-18'
     })
+
+@app.route('/test_invidious')
+def test_invidious():
+    """Test Invidious instances to see which ones are working"""
+    try:
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+        
+        print(f"[Test] Testing Invidious instances with URL: {test_url}")
+        
+        # Test Invidious API
+        info, error = extract_video_info_invidious(test_url)
+        
+        if info and not error:
+            return jsonify({
+                'status': 'success',
+                'message': 'Invidious API is working',
+                'test_url': test_url,
+                'title': info.get('title', 'Unknown'),
+                'formats_count': len(info.get('formats', [])),
+                'method': 'Invidious API',
+                'working_instances': 'Found working instance'
+            })
+        else:
+            return jsonify({
+                'status': 'failed',
+                'message': 'Invidious API failed',
+                'test_url': test_url,
+                'error': error,
+                'method': 'Invidious API'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'error_type': str(type(e)),
+            'timestamp': '2024-01-18'
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
