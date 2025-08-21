@@ -459,6 +459,60 @@ def get_video_info():
             print(f"[DEBUG] Downloads folder error: {str(e)}")
             return jsonify({'error': f'Server configuration error: {str(e)}'}), 500
         
+        print(f"[DEBUG] Trying alternative methods first...")
+        
+        # Try alternative methods first (no yt-dlp)
+        try:
+            # Method 1: Try Invidious API
+            print(f"[DEBUG] Trying Invidious API...")
+            info, error = extract_video_info_invidious(url)
+            if info and not error:
+                print(f"[DEBUG] Invidious API successful: {len(info.get('formats', []))} formats")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'formats': info.get('formats', []),
+                    'video_id': info.get('video_id'),
+                    'method': 'Invidious API',
+                    'warning': 'Using alternative method - no authentication required'
+                })
+        except Exception as e:
+            print(f"[DEBUG] Invidious API failed: {str(e)}")
+        
+        try:
+            # Method 2: Try direct YouTube extraction
+            print(f"[DEBUG] Trying direct YouTube extraction...")
+            info, error = extract_video_info_direct(url)
+            if info and not error:
+                # Create a basic format list since direct extraction doesn't give formats
+                basic_formats = [
+                    {
+                        'format_id': 'best',
+                        'height': 720,
+                        'ext': 'mp4',
+                        'format_note': 'Best available (direct extraction)',
+                        'method': 'Direct',
+                        'url': None  # No direct URL available
+                    }
+                ]
+                
+                print(f"[DEBUG] Direct YouTube extraction successful")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': 0,
+                    'thumbnail': info.get('thumbnail_url', ''),
+                    'formats': basic_formats,
+                    'video_id': info.get('video_id'),
+                    'method': 'Direct YouTube',
+                    'warning': 'Using basic extraction - limited format options'
+                })
+        except Exception as e:
+            print(f"[DEBUG] Direct YouTube extraction failed: {str(e)}")
+        
+        print(f"[DEBUG] Alternative methods failed, falling back to yt-dlp...")
+        
+        # Only use yt-dlp as a last resort
         # Configure yt-dlp options for info extraction
         ydl_opts = {
             'quiet': False,  # Changed to False for debugging
@@ -593,7 +647,9 @@ def get_video_info():
                     'duration': info.get('duration', 0),
                     'thumbnail': info.get('thumbnail', ''),
                     'formats': unique_formats,
-                    'video_id': extract_video_id(url)
+                    'video_id': extract_video_id(url),
+                    'method': 'yt-dlp (fallback)',
+                    'warning': 'Using yt-dlp fallback - may require authentication'
                 }
                 
                 print(f"[DEBUG] Returning response with {len(unique_formats)} formats")
@@ -607,14 +663,15 @@ def get_video_info():
             
             # Return detailed error for debugging
             return jsonify({
-                'error': f'yt-dlp error: {str(yt_dlp_error)}',
+                'error': f'All methods failed. yt-dlp error: {str(yt_dlp_error)}',
                 'error_type': str(type(yt_dlp_error)),
                 'debug_info': {
                     'python_version': os.sys.version,
                     'yt_dlp_version': yt_dlp.version.__version__,
                     'working_directory': os.getcwd(),
                     'downloads_folder': UPLOAD_FOLDER
-                }
+                },
+                'suggestion': 'Try using the alternative routes: /get_video_info_alternative'
             }), 500
         
     except Exception as e:
@@ -702,6 +759,56 @@ def download_video():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
+        print(f"[Download] Trying alternative methods first...")
+        
+        # Try alternative methods first (no yt-dlp)
+        try:
+            # Method 1: Try Invidious download
+            print(f"[Download] Trying Invidious download...")
+            info, error = extract_video_info_invidious(url)
+            if info and not error:
+                # Find the requested format
+                selected_format = None
+                for fmt in info.get('formats', []):
+                    if str(fmt.get('format_id')) == str(format_id) or format_id == 'best':
+                        selected_format = fmt
+                        if format_id == 'best':
+                            break  # Use first (highest quality) format
+                
+                if selected_format and selected_format.get('url'):
+                    # Generate filename
+                    safe_title = "".join(c for c in info.get('title', 'Unknown') if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    filename = f"{safe_title}_{selected_format.get('height', 'unknown')}p.mp4"
+                    output_path = os.path.join(UPLOAD_FOLDER, filename)
+                    
+                    print(f"[Download] Downloading {filename} from Invidious...")
+                    
+                    # Download the video
+                    success, message = download_video_direct(selected_format['url'], selected_format, output_path)
+                    
+                    if success:
+                        file_size = os.path.getsize(output_path)
+                        print(f"[Download] Alternative download successful: {filename}, size: {file_size}")
+                        return jsonify({
+                            'success': True,
+                            'filename': filename,
+                            'filepath': output_path,
+                            'title': info.get('title', 'Unknown Title'),
+                            'filesize': file_size,
+                            'selected_quality': f"{selected_format.get('height', 'Unknown')}p",
+                            'method': 'Invidious API (Alternative)',
+                            'message': message
+                        })
+                    else:
+                        print(f"[Download] Alternative download failed: {message}")
+                else:
+                    print(f"[Download] Selected format not available in alternative method")
+        except Exception as e:
+            print(f"[Download] Alternative download failed: {str(e)}")
+        
+        print(f"[Download] Alternative methods failed, falling back to yt-dlp...")
+        
+        # Only use yt-dlp as a last resort
         # Configure yt-dlp options for download
         ydl_opts = {
             'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
@@ -730,7 +837,7 @@ def download_video():
             }],
         }
         
-        print(f"[Download] Using format_id: {format_id}")
+        print(f"[Download] Using yt-dlp fallback with format_id: {format_id}")
         print(f"[Download] Full format string: {format_id}+bestaudio/best")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -794,8 +901,10 @@ def download_video():
                     'filepath': filename,
                     'title': info.get('title', 'Unknown Title'),
                     'filesize': file_size,
-                    'selected_quality': f"{selected_format.get('height', 'Unknown')}p" if selected_format else 'Unknown',
-                    'expected_size': selected_format.get('filesize', 'Unknown') if selected_format else 'Unknown'
+                    'selected_quality': f"{selected_format.get('height', 'Unknown')}p",
+                    'expected_size': selected_format.get('filesize', 'Unknown') if selected_format else 'Unknown',
+                    'method': 'yt-dlp (fallback)',
+                    'warning': 'Using yt-dlp fallback - may require authentication'
                 })
             else:
                 # Try fallback download with simpler format
@@ -821,13 +930,15 @@ def download_video():
                             'title': info.get('title', 'Unknown Title'),
                             'filesize': file_size,
                             'selected_quality': 'Fallback quality (best available)',
-                            'expected_size': 'Unknown'
+                            'expected_size': 'Unknown',
+                            'method': 'yt-dlp fallback (best available)',
+                            'warning': 'Using yt-dlp fallback - may require authentication'
                         })
                     else:
                         return jsonify({'error': 'Both download attempts failed'}), 500
                 
     except Exception as e:
-        print(f"Error in download_video: {str(e)}")  # Debug print
+        print(f"Error in download_video: {str(e)}")
         return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
 
 @app.route('/download_video_alternative', methods=['POST'])
