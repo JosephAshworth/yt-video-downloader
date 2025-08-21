@@ -296,7 +296,47 @@ def get_video_info():
                 'http_chunk_size': 10485760,  # 10MB chunks
                 'sleep_interval': 2,
                 'max_sleep_interval': 10,
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                # Enhanced bot avoidance for deployment
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0',
+                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Referer': 'https://www.youtube.com/',
+                    'Origin': 'https://www.youtube.com'
+                },
+                # Additional bot avoidance
+                'socket_timeout': 30,
+                'extractor_retries': 3,
+                'sleep_interval_requests': 2,
+                'max_sleep_interval_requests': 5,
+                'prefer_ffmpeg': True,
+                'no_color': True,
+                'quiet': False,
+                'verbose': False,
+                'no_warnings': True,
+                'extract_flat': False,
+                'allow_unplayable_formats': False,
+                'ignore_no_formats_error': False,
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'live_chat'],
+                        'player_client': ['android', 'web'],
+                        'player_skip': ['webpage', 'configs'],
+                    }
+                }
             })
         
         print(f"[DEBUG] yt-dlp options: {ydl_opts}")
@@ -423,6 +463,90 @@ def get_video_info():
             import traceback
             print(f"[DEBUG] Full traceback: {traceback.format_exc()}")
             
+            # Check if it's a bot detection error
+            error_msg = str(yt_dlp_error).lower()
+            if 'sign in to confirm' in error_msg or 'bot' in error_msg or '403' in error_msg:
+                print(f"[DEBUG] Bot detection detected, trying alternative method...")
+                
+                # Try alternative approach with different user agent and settings
+                try:
+                    alternative_opts = {
+                        'quiet': True,
+                        'no_warnings': True,
+                        'extract_flat': False,
+                        'nocheckcertificate': True,
+                        'ignoreerrors': False,
+                        'retries': 3,
+                        'fragment_retries': 3,
+                        'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.9',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Referer': 'https://www.youtube.com/',
+                        },
+                        'extractor_args': {
+                            'youtube': {
+                                'skip': ['dash'],
+                                'player_client': ['web'],
+                            }
+                        }
+                    }
+                    
+                    print(f"[DEBUG] Trying alternative yt-dlp options: {alternative_opts}")
+                    
+                    with yt_dlp.YoutubeDL(alternative_opts) as alt_ydl:
+                        info = alt_ydl.extract_info(url, download=False)
+                        
+                        # Process formats with alternative method
+                        formats = []
+                        for f in info.get('formats', []):
+                            if (f.get('height') and f.get('ext') and 
+                                f.get('vcodec') and f.get('vcodec') != 'none' and
+                                f.get('height') >= 144 and
+                                f.get('protocol') != 'mhtml' and
+                                not f.get('ext') in ['html', 'htm', 'mhtml'] and
+                                f.get('ext') in ['mp4', 'webm', 'mkv', 'avi', 'mov']):
+                                
+                                is_video_only = f.get('acodec') == 'none' or not f.get('acodec')
+                                formats.append({
+                                    'format_id': f.get('format_id', ''),
+                                    'height': f.get('height', 0),
+                                    'ext': f.get('ext', ''),
+                                    'filesize': f.get('filesize', 0),
+                                    'format_note': f.get('format_note', ''),
+                                    'vcodec': f.get('vcodec', ''),
+                                    'acodec': f.get('acodec', ''),
+                                    'fps': f.get('fps', 0),
+                                    'tbr': f.get('tbr', 0),
+                                    'protocol': f.get('protocol', ''),
+                                    'is_video_only': is_video_only
+                                })
+                        
+                        # Sort and deduplicate formats
+                        formats.sort(key=lambda x: (x['height'], x.get('tbr', 0)), reverse=True)
+                        unique_formats = []
+                        seen_heights = set()
+                        for f in formats:
+                            if f['height'] not in seen_heights:
+                                seen_heights.add(f['height'])
+                                unique_formats.append(f)
+                        
+                        if unique_formats:
+                            print(f"[DEBUG] Alternative method successful, found {len(unique_formats)} formats")
+                            return jsonify({
+                                'title': info.get('title', 'Unknown Title'),
+                                'duration': info.get('duration', 0),
+                                'thumbnail': info.get('thumbnail', ''),
+                                'formats': unique_formats,
+                                'video_id': extract_video_id(url),
+                                'warning': 'Used alternative method due to bot detection'
+                            })
+                        
+                except Exception as alt_error:
+                    print(f"[DEBUG] Alternative method also failed: {str(alt_error)}")
+            
             # Return detailed error for debugging
             return jsonify({
                 'error': f'yt-dlp error: {str(yt_dlp_error)}',
@@ -431,7 +555,10 @@ def get_video_info():
                     'python_version': os.sys.version,
                     'yt_dlp_version': yt_dlp.version.__version__,
                     'working_directory': os.getcwd(),
-                    'downloads_folder': UPLOAD_FOLDER
+                    'downloads_folder': UPLOAD_FOLDER,
+                    'is_production': IS_PRODUCTION,
+                    'is_render': IS_RENDER,
+                    'is_heroku': IS_HEROKU
                 }
             }), 500
         
