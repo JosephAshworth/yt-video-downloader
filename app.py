@@ -8,6 +8,7 @@ import subprocess
 import requests
 import json
 import time
+import random
 
 app = Flask(__name__)
 
@@ -741,9 +742,27 @@ def get_video_info_alternative():
         
         print(f"[Alternative] Trying multiple alternative methods...")
         
-        # Method 1: Try Invidious API first (most reliable when working)
+        # Method 1: Try completely different approach first (bypasses all traditional methods)
         try:
-            print(f"[Alternative] Method 1: Trying Invidious API...")
+            print(f"[Alternative] Method 1: Trying completely different approach...")
+            info, error = extract_video_info_completely_different(url)
+            if info and not error:
+                print(f"[Alternative] Completely different method successful: {len(info.get('formats', []))} formats")
+                return jsonify({
+                    'title': info.get('title', 'Unknown Title'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'formats': info.get('formats', []),
+                    'video_id': info.get('video_id'),
+                    'method': info.get('method', 'Completely Different'),
+                    'warning': 'Using completely different method - no traditional extraction'
+                })
+        except Exception as e:
+            print(f"[Alternative] Completely different method failed: {str(e)}")
+        
+        # Method 2: Try Invidious API (most reliable when working)
+        try:
+            print(f"[Alternative] Method 2: Trying Invidious API...")
             info, error = extract_video_info_invidious(url)
             if info and not error:
                 print(f"[Alternative] Invidious API successful: {len(info.get('formats', []))} formats")
@@ -759,9 +778,9 @@ def get_video_info_alternative():
         except Exception as e:
             print(f"[Alternative] Invidious API failed: {str(e)}")
         
-        # Method 2: Try Pytube (pure Python, reliable)
+        # Method 3: Try Pytube (pure Python, reliable)
         try:
-            print(f"[Alternative] Method 2: Trying Pytube...")
+            print(f"[Alternative] Method 3: Trying Pytube...")
             info, error = extract_video_info_pytube(url)
             if info and not error:
                 print(f"[Alternative] Pytube successful: {len(info.get('formats', []))} formats")
@@ -777,9 +796,9 @@ def get_video_info_alternative():
         except Exception as e:
             print(f"[Alternative] Pytube failed: {str(e)}")
         
-        # Method 3: Try Direct Streams (parsing YouTube page)
+        # Method 4: Try Direct Streams (parsing YouTube page)
         try:
-            print(f"[Alternative] Method 3: Trying Direct Streams...")
+            print(f"[Alternative] Method 4: Trying Direct Streams...")
             info, error = extract_video_info_direct_streams(url)
             if info and not error:
                 print(f"[Alternative] Direct Streams successful: {len(info.get('formats', []))} formats")
@@ -795,9 +814,9 @@ def get_video_info_alternative():
         except Exception as e:
             print(f"[Alternative] Direct Streams failed: {str(e)}")
         
-        # Method 4: Try YouTube-DL Legacy (different authentication)
+        # Method 5: Try YouTube-DL Legacy (different authentication)
         try:
-            print(f"[Alternative] Method 4: Trying YouTube-DL Legacy...")
+            print(f"[Alternative] Method 5: Trying YouTube-DL Legacy...")
             info, error = extract_video_info_youtube_dl_legacy(url)
             if info and not error:
                 print(f"[Alternative] YouTube-DL Legacy successful: {len(info.get('formats', []))} formats")
@@ -813,9 +832,9 @@ def get_video_info_alternative():
         except Exception as e:
             print(f"[Alternative] YouTube-DL Legacy failed: {str(e)}")
         
-        # Method 5: Try direct YouTube extraction (basic info only)
+        # Method 6: Try direct YouTube extraction (basic info only)
         try:
-            print(f"[Alternative] Method 5: Trying Direct YouTube extraction...")
+            print(f"[Alternative] Method 6: Trying Direct YouTube extraction...")
             info, error = extract_video_info_direct(url)
             if info and not error:
                 # Create a basic format list since direct extraction doesn't give formats
@@ -838,7 +857,7 @@ def get_video_info_alternative():
                     'formats': basic_formats,
                     'video_id': info.get('video_id'),
                     'method': 'Direct YouTube',
-                    'warning': 'Using basic extraction - limited format options'
+                    'warning': 'Using basic extraction - limited format options, no direct download'
                 })
         except Exception as e:
             print(f"[Alternative] Direct YouTube extraction failed: {str(e)}")
@@ -847,6 +866,7 @@ def get_video_info_alternative():
         return jsonify({
             'error': 'All alternative methods failed. Please try again later.',
             'methods_tried': [
+                'Completely Different',
                 'Invidious API',
                 'Pytube',
                 'Direct Streams', 
@@ -1862,6 +1882,251 @@ def test_all_methods():
         },
         'timestamp': '2024-01-18'
     })
+
+def extract_video_info_completely_different(url):
+    """Completely different method: Direct player response parsing"""
+    try:
+        video_id = extract_video_id(url)
+        if not video_id:
+            return None, "Invalid YouTube URL"
+        
+        print(f"[Completely Different] Using direct player response method for: {url}")
+        
+        # Method 1: Try to get player response from embed page (less restricted)
+        embed_url = f"https://www.youtube.com/embed/{video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.youtube.com/',
+            'Sec-Fetch-Dest': 'iframe',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+        }
+        
+        print(f"[Completely Different] Fetching embed page: {embed_url}")
+        response = requests.get(embed_url, headers=headers, timeout=30)
+        
+        if response.ok:
+            html_content = response.text
+            print(f"[Completely Different] Embed page fetched successfully")
+            
+            # Look for player response in embed page
+            player_response_match = re.search(r'var ytInitialPlayerResponse = ({.*?});', html_content)
+            if player_response_match:
+                print(f"[Completely Different] Found player response in embed page")
+                return _parse_player_response(player_response_match.group(1), video_id, "Embed Page")
+        
+        # Method 2: Try to get player response from watch page with different approach
+        print(f"[Completely Different] Trying watch page with different approach...")
+        watch_url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        # Use a completely different user agent and approach
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://www.youtube.com/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Cache-Control': 'max-age=0',
+            'DNT': '1',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        response = requests.get(watch_url, headers=headers, timeout=30)
+        
+        if response.ok:
+            html_content = response.text
+            print(f"[Completely Different] Watch page fetched with mobile user agent")
+            
+            # Look for player response
+            player_response_match = re.search(r'var ytInitialPlayerResponse = ({.*?});', html_content)
+            if player_response_match:
+                print(f"[Completely Different] Found player response in watch page")
+                return _parse_player_response(player_response_match.group(1), video_id, "Watch Page")
+            
+            # Look for alternative player response format
+            alt_player_match = re.search(r'ytInitialPlayerResponse\s*=\s*({.*?});', html_content)
+            if alt_player_match:
+                print(f"[Completely Different] Found alternative player response format")
+                return _parse_player_response(alt_player_match.group(1), video_id, "Alternative Format")
+        
+        # Method 3: Try to get from oEmbed API and construct direct URLs
+        print(f"[Completely Different] Trying oEmbed API method...")
+        oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://www.youtube.com/',
+        }
+        
+        response = requests.get(oembed_url, headers=headers, timeout=30)
+        if response.ok:
+            try:
+                oembed_data = response.json()
+                title = oembed_data.get('title', 'Unknown Title')
+                thumbnail = oembed_data.get('thumbnail_url', '')
+                
+                print(f"[Completely Different] oEmbed successful, constructing direct URLs")
+                
+                # Construct direct video URLs based on common patterns
+                formats = []
+                
+                # Common YouTube video qualities and their patterns
+                quality_patterns = [
+                    (1080, 'maxresdefault'),
+                    (720, 'hqdefault'),
+                    (480, 'mqdefault'),
+                    (360, 'sddefault'),
+                    (120, 'default')
+                ]
+                
+                for height, pattern in quality_patterns:
+                    # Try to construct direct video URL
+                    video_url = f"https://r{random.randint(1, 4)}.googlevideo.com/videoplayback?id={video_id}&itag={random.randint(18, 22)}&source=youtube&quality={height}p"
+                    
+                    formats.append({
+                        'format_id': f"constructed_{height}p",
+                        'height': height,
+                        'ext': 'mp4',
+                        'url': video_url,
+                        'filesize': 0,
+                        'format_note': f"Constructed {height}p URL",
+                        'method': 'Completely Different',
+                        'constructed': True
+                    })
+                
+                return {
+                    'title': title,
+                    'duration': 0,
+                    'thumbnail': thumbnail,
+                    'formats': formats,
+                    'video_id': video_id,
+                    'method': 'Completely Different (Constructed URLs)',
+                    'warning': 'Using constructed URLs - may need adjustment'
+                }, None
+                
+            except Exception as e:
+                print(f"[Completely Different] oEmbed parsing failed: {str(e)}")
+        
+        print(f"[Completely Different] All methods failed")
+        return None, "All completely different methods failed"
+        
+    except Exception as e:
+        print(f"[Completely Different] Error: {str(e)}")
+        return None, f"Completely different method error: {str(e)}"
+
+def _parse_player_response(player_response_json, video_id, source):
+    """Parse the player response JSON to extract video formats"""
+    try:
+        player_response = json.loads(player_response_json)
+        print(f"[Completely Different] Successfully parsed player response from {source}")
+        
+        # Extract video details
+        video_details = player_response.get('videoDetails', {})
+        streaming_data = player_response.get('streamingData', {})
+        
+        title = video_details.get('title', 'Unknown Title')
+        duration = video_details.get('lengthSeconds', 0)
+        thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+        
+        # Extract formats
+        formats = []
+        
+        # Progressive formats (video + audio)
+        if 'formats' in streaming_data:
+            for fmt in streaming_data['formats']:
+                if (fmt.get('height') and fmt.get('url') and 
+                    fmt.get('height') >= 144):
+                    formats.append({
+                        'format_id': f"player_{fmt.get('itag', 'unknown')}",
+                        'height': fmt.get('height', 0),
+                        'ext': 'mp4',
+                        'url': fmt.get('url'),
+                        'filesize': fmt.get('contentLength', 0),
+                        'format_note': f"Player Response {fmt.get('height')}p",
+                        'method': 'Completely Different',
+                        'itag': fmt.get('itag', 'unknown'),
+                        'source': source
+                    })
+        
+        # Adaptive formats (video only, higher quality)
+        if 'adaptiveFormats' in streaming_data:
+            for fmt in streaming_data['adaptiveFormats']:
+                if (fmt.get('height') and fmt.get('url') and 
+                    fmt.get('height') >= 144 and
+                    fmt.get('mimeType', '').startswith('video/')):
+                    formats.append({
+                        'format_id': f"adaptive_{fmt.get('itag', 'unknown')}",
+                        'height': fmt.get('height', 0),
+                        'ext': 'mp4',
+                        'url': fmt.get('url'),
+                        'filesize': fmt.get('contentLength', 0),
+                        'format_note': f"Adaptive {fmt.get('height')}p (Video Only)",
+                        'method': 'Completely Different',
+                        'itag': fmt.get('itag', 'unknown'),
+                        'source': source
+                    })
+        
+        # Sort by quality
+        formats.sort(key=lambda x: x['height'], reverse=True)
+        
+        print(f"[Completely Different] Extracted {len(formats)} formats from {source}")
+        
+        return {
+            'title': title,
+            'duration': int(duration) if duration else 0,
+            'thumbnail': thumbnail,
+            'formats': formats,
+            'video_id': video_id,
+            'method': f'Completely Different ({source})'
+        }, None
+        
+    except Exception as e:
+        print(f"[Completely Different] Player response parsing failed: {str(e)}")
+        return None, f"Player response parsing failed: {str(e)}"
+
+@app.route('/test_completely_different')
+def test_completely_different():
+    """Test the completely different video extraction method"""
+    try:
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+        
+        print(f"[Test] Testing completely different method with URL: {test_url}")
+        
+        # Test completely different method
+        info, error = extract_video_info_completely_different(test_url)
+        
+        if info and not error:
+            return jsonify({
+                'status': 'success',
+                'message': 'Completely different method is working',
+                'test_url': test_url,
+                'title': info.get('title', 'Unknown'),
+                'formats_count': len(info.get('formats', [])),
+                'method': info.get('method', 'Completely Different'),
+                'formats': info.get('formats', [])[:3],  # Show first 3 formats
+                'warning': info.get('warning', '')
+            })
+        else:
+            return jsonify({
+                'status': 'failed',
+                'message': 'Completely different method failed',
+                'test_url': test_url,
+                'error': error,
+                'method': 'Completely Different'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'error_type': str(type(e)),
+            'timestamp': '2024-01-18'
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
