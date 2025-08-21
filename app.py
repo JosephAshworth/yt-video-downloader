@@ -1,19 +1,68 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, flash
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import yt_dlp
 import os
 import re
 import tempfile
 import random
 import time
+import json
+import hashlib
 from urllib.parse import urlparse, parse_qs
 import subprocess
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
 
-# Configure upload folder
+# Configure Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# Configure folders
 UPLOAD_FOLDER = 'downloads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+COOKIES_FOLDER = 'cookies'
+USERS_FOLDER = 'users'
+
+for folder in [UPLOAD_FOLDER, COOKIES_FOLDER, USERS_FOLDER]:
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+# Simple user class for authentication
+class User(UserMixin):
+    def __init__(self, user_id, username, cookies_file=None):
+        self.id = user_id
+        self.username = username
+        self.cookies_file = cookies_file
+
+# In-memory user storage (in production, use a database)
+users = {}
+
+@login_manager.user_loader
+def load_user(user_id):
+    return users.get(user_id)
+
+def save_user_data():
+    """Save user data to file"""
+    user_data = {}
+    for user_id, user in users.items():
+        user_data[user_id] = {
+            'username': user.username,
+            'cookies_file': user.cookies_file
+        }
+    
+    with open(os.path.join(USERS_FOLDER, 'users.json'), 'w') as f:
+        json.dump(user_data, f)
+
+def load_user_data():
+    """Load user data from file"""
+    users_file = os.path.join(USERS_FOLDER, 'users.json')
+    if os.path.exists(users_file):
+        with open(users_file, 'r') as f:
+            user_data = json.load(f)
+            for user_id, data in user_data.items():
+                users[user_id] = User(user_id, data['username'], data.get('cookies_file'))
 
 def is_valid_youtube_url(url):
     """Check if the URL is a valid YouTube URL"""
@@ -325,14 +374,114 @@ def test_youtube_access():
         'status': 'ok',
         'message': 'YouTube access test results',
         'results': results,
-        'timestamp': '2024-01-18'
+        'timestamp': '2024-0-18'
     })
 
+@app.route('/auth_status')
+def auth_status():
+    """Check authentication status"""
+    if current_user.is_authenticated:
+        return jsonify({
+            'authenticated': True,
+            'username': current_user.username,
+            'has_cookies': bool(current_user.cookies_file and os.path.exists(current_user.cookies_file)),
+            'cookies_file': current_user.cookies_file
+        })
+    else:
+        return jsonify({
+            'authenticated': False,
+            'message': 'User not authenticated'
+        })
+
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        # Check if user exists
+        user = None
+        for u in users.values():
+            if u.username == username:
+                user = u
+                break
+        
+        if user and check_password_hash(user.password_hash, password):
+            login_user(user)
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password')
+    
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        # Check if username already exists
+        for u in users.values():
+            if u.username == username:
+                flash('Username already exists')
+                return render_template('register.html')
+        
+        # Create new user
+        user_id = str(len(users) + 1)
+        password_hash = generate_password_hash(password)
+        user = User(user_id, username)
+        user.password_hash = password_hash
+        users[user_id] = user
+        
+        save_user_data()
+        flash('Registration successful! Please log in.')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/upload_cookies', methods=['GET', 'POST'])
+@login_required
+def upload_cookies():
+    if request.method == 'POST':
+        if 'cookies_file' not in request.files:
+            flash('No file selected')
+            return redirect(request.url)
+        
+        file = request.files['cookies_file']
+        if file.filename == '':
+            flash('No file selected')
+            return redirect(request.url)
+        
+        if file and file.filename.endswith('.txt'):
+            # Save cookies file
+            filename = f"cookies_{current_user.username}.txt"
+            filepath = os.path.join(COOKIES_FOLDER, filename)
+            file.save(filepath)
+            
+            # Update user's cookies file
+            current_user.cookies_file = filepath
+            save_user_data()
+            
+            flash('Cookies uploaded successfully!')
+            return redirect(url_for('index'))
+        else:
+            flash('Please upload a .txt file')
+    
+    return render_template('upload_cookies.html')
+
 @app.route('/get_video_info', methods=['POST'])
+@login_required
 def get_video_info():
     try:
         data = request.get_json()
@@ -344,87 +493,40 @@ def get_video_info():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Use advanced bot avoidance techniques
-        ydl_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
-        ydl_opts.update({
+        # Check if user has cookies
+        if not current_user.cookies_file or not os.path.exists(current_user.cookies_file):
+            return jsonify({'error': 'Please upload your YouTube cookies first. Go to Upload Cookies in the menu.'}), 401
+        
+        # Use user's cookies for authentication
+        ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-        })
+            'cookiefile': current_user.cookies_file,  # Use user's cookies
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            },
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+        }
         
-        # Retry mechanism with exponential backoff for bot detection
-        max_retries = 3
-        retry_delay = 2
-        
-        for attempt in range(max_retries):
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    break  # Success, exit retry loop
-            except Exception as e:
-                error_msg = str(e).lower()
-                if 'bot' in error_msg or 'sign in' in error_msg or '403' in error_msg:
-                    print(f"[Bot Detection] Attempt {attempt + 1} failed: {str(e)}")
-                    if attempt < max_retries - 1:
-                        print(f"[Bot Detection] Waiting {retry_delay} seconds before retry...")
-                        time.sleep(retry_delay)
-                        # Try different approach for next attempt
-                        if attempt == 1:
-                            # Second attempt: try mobile user agent
-                            ydl_opts['user_agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1'
-                            ydl_opts['http_headers'] = get_enhanced_headers_for_user_agent(ydl_opts['user_agent'])
-                        elif attempt == 2:
-                            # Third attempt: try Firefox with different approach
-                            ydl_opts['user_agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
-                            ydl_opts['http_headers'] = get_enhanced_headers_for_user_agent(ydl_opts['user_agent'])
-                            # Add different extractor args
-                            ydl_opts['extractor_args'] = {
-                                'youtube': {
-                                    'skip': ['dash'],
-                                    'player_client': ['web'],
-                                    'player_skip': ['webpage'],
-                                }
-                            }
-                        
-                        retry_delay *= 2  # Exponential backoff
-                        continue
-                    else:
-                        print(f"[Bot Detection] All retry attempts failed, trying fallback method...")
-                        # Try one last time with minimal options
-                        try:
-                            fallback_opts = {
-                                'format': 'best[ext=mp4]/best',
-                                'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_fallback.mp4'),
-                                'quiet': True,
-                                'no_warnings': True,
-                                'user_agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-                                'http_headers': {
-                                    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                                }
-                            }
-                            
-                            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-                                info = ydl.extract_info(url, download=False)
-                                return jsonify({
-                                    'title': info.get('title', 'Unknown Title'),
-                                    'duration': info.get('duration', 0),
-                                    'thumbnail': info.get('thumbnail', ''),
-                                    'formats': [{
-                                        'format_id': 'best[ext=mp4]/best',
-                                        'height': 720,
-                                        'ext': 'mp4',
-                                        'format_note': 'Fallback format (best available)',
-                                    }],
-                                    'video_id': extract_video_id(url),
-                                    'warning': 'Using fallback method due to bot detection'
-                                })
-                        except Exception as fallback_error:
-                            print(f"[Fallback] Also failed: {str(fallback_error)}")
-                            return jsonify({'error': 'YouTube is blocking all access methods. Please try again later or use a different video.'}), 429
-                else:
-                    # Non-bot related error, don't retry
-                    raise e
+        # Extract video info using user's cookies
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as e:
+            print(f"Error extracting video info: {str(e)}")
+            if 'cookies' in str(e).lower() or 'authentication' in str(e).lower():
+                return jsonify({'error': 'Your cookies may have expired. Please re-upload your YouTube cookies.'}), 401
+            else:
+                return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
         
         # Get available formats and filter for actual video formats (allow video-only for higher qualities)
             formats = []
@@ -517,6 +619,7 @@ def get_video_info():
         return jsonify({'error': f'Error extracting video info: {str(e)}'}), 500
 
 @app.route('/download_video', methods=['POST'])
+@login_required
 def download_video():
     try:
         data = request.get_json()
@@ -530,9 +633,12 @@ def download_video():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Use advanced bot avoidance techniques for download
-        ydl_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
-        ydl_opts.update({
+        # Check if user has cookies
+        if not current_user.cookies_file or not os.path.exists(current_user.cookies_file):
+            return jsonify({'error': 'Please upload your YouTube cookies first. Go to Upload Cookies in the menu.'}), 401
+        
+        # Use user's cookies for authentication
+        ydl_opts = {
             'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
             'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(format_id)s.mp4'),  # Output as MP4
             'quiet': False,  # Show more output for debugging
@@ -542,47 +648,48 @@ def download_video():
             'skip': ['storyboard', 'image'],
             'extractaudio': False,
             'audioformat': None,
-        })
+            'cookiefile': current_user.cookies_file,  # Use user's cookies
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            },
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'retries': 3,
+            'fragment_retries': 3,
+            'prefer_ffmpeg': True,
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+        }
         
         print(f"[Download] Using format_id: {format_id}")
         print(f"[Download] Full format string: {format_id}+bestaudio/best")
         
-        # Retry mechanism with exponential backoff for bot detection during download
-        max_retries = 3
-        retry_delay = 3
-        
-        for attempt in range(max_retries):
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # First, extract info to validate the format
-                    info = ydl.extract_info(url, download=False)
-                    print(f"Video title: {info.get('title', 'Unknown')}")
-                    print(f"Available formats: {len(info.get('formats', []))}")
-                    
-                    # Download the video with the selected format
-                    info = ydl.extract_info(url, download=True)
-                    filename = ydl.prepare_filename(info)
-                    break  # Success, exit retry loop
-            except Exception as e:
-                error_msg = str(e).lower()
-                if 'bot' in error_msg or 'sign in' in error_msg or '403' in error_msg:
-                    print(f"[Download Bot Detection] Attempt {attempt + 1} failed: {str(e)}")
-                    if attempt < max_retries - 1:
-                        print(f"[Download Bot Detection] Waiting {retry_delay} seconds before retry...")
-                        time.sleep(retry_delay)
-                        # Rotate user agent for next attempt
-                        user_agent = get_random_user_agent()
-                        headers = get_headers_for_user_agent(user_agent)
-                        ydl_opts['user_agent'] = user_agent
-                        ydl_opts['http_headers'] = headers
-                        retry_delay *= 2  # Exponential backoff
-                        continue
-                    else:
-                        print(f"[Download Bot Detection] All retry attempts failed")
-                        return jsonify({'error': 'YouTube is blocking downloads. Please try again later or use a different video.'}), 429
-                else:
-                    # Non-bot related error, don't retry
-                    raise e
+        # Download video using user's cookies
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # First, extract info to validate the format
+                info = ydl.extract_info(url, download=False)
+                print(f"Video title: {info.get('title', 'Unknown')}")
+                print(f"Available formats: {len(info.get('formats', []))}")
+                
+                # Download the video with the selected format
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+        except Exception as e:
+            print(f"Error downloading video: {str(e)}")
+            if 'cookies' in str(e).lower() or 'authentication' in str(e).lower():
+                return jsonify({'error': 'Your cookies may have expired. Please re-upload your YouTube cookies.'}), 401
+            else:
+                return jsonify({'error': f'Error downloading video: {str(e)}'}), 500
             
             print(f"[Download] Expected filename: {filename}")
             print(f"[Download] Selected format_id: {format_id}")
@@ -932,6 +1039,9 @@ def debug_formats():
         return jsonify({'error': f'Debug error: {str(e)}'}), 500
 
 if __name__ == '__main__':
+    # Load user data on startup
+    load_user_data()
+    
     # Use environment variables for production deployment
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') == 'development'
