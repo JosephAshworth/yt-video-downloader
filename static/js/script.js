@@ -50,7 +50,9 @@ async function analyzeVideo() {
     showSection(loadingSection);
     
     try {
-        const response = await fetch('/get_video_info', {
+        // Try alternative method first (no yt-dlp)
+        console.log('Trying alternative video analysis...');
+        const response = await fetch('/get_video_info_alternative', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -225,7 +227,9 @@ async function downloadVideo() {
     showSection(downloadProgress);
     
     try {
-        const response = await fetch('/download_video', {
+        // Use alternative download method (no yt-dlp)
+        console.log('Using alternative download method...');
+        const response = await fetch('/download_video_alternative', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
