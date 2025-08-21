@@ -232,16 +232,34 @@ def extract_video_info_direct(url):
             'Referer': 'https://www.youtube.com/',
         }
         
-        response = requests.get(oembed_url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            oembed_data = response.json()
-            return {
-                'title': oembed_data.get('title', 'Unknown Title'),
-                'author_name': oembed_data.get('author_name', 'Unknown'),
-                'thumbnail_url': oembed_data.get('thumbnail_url', ''),
-                'video_id': video_id,
-                'method': 'oEmbed API'
-            }, None
+        try:
+            response = requests.get(oembed_url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                # Validate response content
+                if not response.text or response.text.strip() == '':
+                    print("YouTube oEmbed API returned empty response")
+                else:
+                    try:
+                        oembed_data = response.json()
+                        if isinstance(oembed_data, dict) and oembed_data.get('title'):
+                            return {
+                                'title': oembed_data.get('title', 'Unknown Title'),
+                                'author_name': oembed_data.get('author_name', 'Unknown'),
+                                'thumbnail_url': oembed_data.get('thumbnail_url', ''),
+                                'video_id': video_id,
+                                'method': 'oEmbed API'
+                            }, None
+                        else:
+                            print("YouTube oEmbed API returned invalid data structure")
+                    except json.JSONDecodeError as json_error:
+                        print(f"YouTube oEmbed API returned invalid JSON: {str(json_error)}")
+                        print(f"Response content: {response.text[:200]}...")
+            else:
+                print(f"YouTube oEmbed API returned status {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"YouTube oEmbed API request failed: {str(e)}")
+        except Exception as e:
+            print(f"YouTube oEmbed API unexpected error: {str(e)}")
         
         # Method 2: Try to extract from page HTML
         page_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -252,25 +270,35 @@ def extract_video_info_direct(url):
             'Referer': 'https://www.youtube.com/',
         }
         
-        response = requests.get(page_url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            html_content = response.text
-            
-            # Try to extract title from HTML
-            title_match = re.search(r'<title>(.*?)</title>', html_content)
-            title = title_match.group(1).replace(' - YouTube', '') if title_match else 'Unknown Title'
-            
-            # Try to extract thumbnail
-            thumbnail_match = re.search(r'"thumbnailUrl":"([^"]+)"', html_content)
-            thumbnail = thumbnail_match.group(1) if thumbnail_match else f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
-            
-            return {
-                'title': title,
-                'author_name': 'Unknown',
-                'thumbnail_url': thumbnail,
-                'video_id': video_id,
-                'method': 'HTML extraction'
-            }, None
+        try:
+            response = requests.get(page_url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                html_content = response.text
+                
+                if not html_content or html_content.strip() == '':
+                    print("YouTube page returned empty HTML content")
+                else:
+                    # Try to extract title from HTML
+                    title_match = re.search(r'<title>(.*?)</title>', html_content)
+                    title = title_match.group(1).replace(' - YouTube', '') if title_match else 'Unknown Title'
+                    
+                    # Try to extract thumbnail
+                    thumbnail_match = re.search(r'"thumbnailUrl":"([^"]+)"', html_content)
+                    thumbnail = thumbnail_match.group(1) if thumbnail_match else f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+                    
+                    return {
+                        'title': title,
+                        'author_name': 'Unknown',
+                        'thumbnail_url': thumbnail,
+                        'video_id': video_id,
+                        'method': 'HTML extraction'
+                    }, None
+            else:
+                print(f"YouTube page returned status {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"YouTube page request failed: {str(e)}")
+        except Exception as e:
+            print(f"YouTube page unexpected error: {str(e)}")
         
         return None, "Could not extract video info"
         
@@ -321,13 +349,32 @@ def extract_video_info_invidious(url):
             
             response = requests.get(api_url, headers=headers, timeout=15)
             if response.status_code == 200:
-                data = response.json()
+                # Validate response content
+                if not response.text or response.text.strip() == '':
+                    print(f"Invidious instance {instance} returned empty response")
+                    continue
+                
+                try:
+                    data = response.json()
+                except json.JSONDecodeError as json_error:
+                    print(f"Invidious instance {instance} returned invalid JSON: {str(json_error)}")
+                    print(f"Response content: {response.text[:200]}...")  # First 200 chars
+                    continue
+                
+                # Validate required fields
+                if not isinstance(data, dict):
+                    print(f"Invidious instance {instance} returned non-dict data: {type(data)}")
+                    continue
+                
+                if 'title' not in data:
+                    print(f"Invidious instance {instance} missing title field")
+                    continue
                 
                 # Get available formats
                 formats = []
-                if 'formatStreams' in data:
+                if 'formatStreams' in data and isinstance(data['formatStreams'], list):
                     for fmt in data['formatStreams']:
-                        if fmt.get('height') and fmt.get('url'):
+                        if isinstance(fmt, dict) and fmt.get('height') and fmt.get('url'):
                             formats.append({
                                 'format_id': fmt.get('itag', 'unknown'),
                                 'height': fmt.get('height', 0),
@@ -341,15 +388,27 @@ def extract_video_info_invidious(url):
                 # Sort by quality
                 formats.sort(key=lambda x: x['height'], reverse=True)
                 
+                # Ensure thumbnail is valid
+                thumbnail = ""
+                if 'videoThumbnails' in data and isinstance(data['videoThumbnails'], list) and len(data['videoThumbnails']) > 0:
+                    first_thumb = data['videoThumbnails'][0]
+                    if isinstance(first_thumb, dict) and first_thumb.get('url'):
+                        thumbnail = first_thumb['url']
+                
                 return {
                     'title': data.get('title', 'Unknown Title'),
                     'duration': data.get('lengthSeconds', 0),
-                    'thumbnail': data.get('videoThumbnails', [{}])[0].get('url', ''),
+                    'thumbnail': thumbnail,
                     'formats': formats,
                     'video_id': video_id,
                     'method': 'Invidious API'
                 }, None
+            else:
+                print(f"Invidious instance {instance} returned status {response.status_code}")
                 
+        except requests.exceptions.RequestException as e:
+            print(f"Invidious instance {instance} request failed: {str(e)}")
+            continue
         except Exception as e:
             print(f"Invidious instance {instance} failed: {str(e)}")
             continue
@@ -429,6 +488,38 @@ def test():
         'message': 'YouTube Downloader is running',
         'timestamp': '2024-01-18'
     })
+
+@app.route('/health')
+def health():
+    """Health check route for debugging"""
+    try:
+        # Test basic functionality
+        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        video_id = extract_video_id(test_url)
+        
+        # Test Invidious instances
+        instances = get_invidious_instances()
+        
+        # Test user agent generation
+        user_agent = get_random_user_agent()
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': '2024-01-18',
+            'tests': {
+                'video_id_extraction': video_id == 'dQw4w9WgXcQ',
+                'invidious_instances': len(instances) > 0,
+                'user_agent_generation': len(user_agent) > 0
+            },
+            'invidious_instances': instances[:3],  # Show first 3
+            'user_agent': user_agent
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': '2024-01-18'
+        }), 500
 
 @app.route('/test_bot_avoidance')
 def test_bot_avoidance():
