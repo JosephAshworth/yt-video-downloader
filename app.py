@@ -38,12 +38,29 @@ def extract_video_id(url):
 def get_random_user_agent():
     """Get a random user agent to avoid detection"""
     user_agents = [
+        # Chrome variants
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+        
+        # Firefox variants
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:109.0) Gecko/20100101 Firefox/121.0',
+        
+        # Safari variants
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+        
+        # Edge variants
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/119.0.0.0',
+        
+        # Mobile variants (sometimes work better)
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (Linux; Android 14; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     ]
     return random.choice(user_agents)
 
@@ -90,6 +107,113 @@ def get_headers_for_user_agent(user_agent):
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
         }
+
+def generate_fake_cookies():
+    """Generate fake cookies to appear more like a real browser session"""
+    import hashlib
+    import time
+    
+    # Generate fake session ID
+    session_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
+    
+    # Generate fake visitor data
+    visitor_id = hashlib.md5(f"visitor_{time.time()}".encode()).hexdigest()[:20]
+    
+    cookies = {
+        'VISITOR_INFO1_LIVE': visitor_id,
+        'LOGIN_INFO': f'AFmmF2swRQKj{hashlib.md5(session_id.encode()).hexdigest()[:20]}',
+        'SID': session_id,
+        'HSID': hashlib.md5(f"hsid_{time.time()}".encode()).hexdigest()[:20],
+        'SSID': hashlib.md5(f"ssid_{time.time()}".encode()).hexdigest()[:20],
+        'APISID': hashlib.md5(f"apisid_{time.time()}".encode()).hexdigest()[:20],
+        'SAPISID': hashlib.md5(f"sapisid_{time.time()}".encode()).hexdigest()[:20],
+        '__Secure-1PSID': hashlib.md5(f"1psid_{time.time()}".encode()).hexdigest()[:20],
+        '__Secure-3PSID': hashlib.md5(f"3psid_{time.time()}".encode()).hexdigest()[:20],
+    }
+    
+    return cookies
+
+def get_enhanced_headers_for_user_agent(user_agent):
+    """Get enhanced headers with cookies and additional bot avoidance"""
+    base_headers = get_headers_for_user_agent(user_agent)
+    
+    # Add fake cookies
+    cookies = generate_fake_cookies()
+    cookie_string = '; '.join([f'{k}={v}' for k, v in cookies.items()])
+    
+    # Enhanced headers
+    enhanced_headers = base_headers.copy()
+    enhanced_headers.update({
+        'Cookie': cookie_string,
+        'Referer': 'https://www.youtube.com/',
+        'Origin': 'https://www.youtube.com',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Dest': 'empty',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-Client-Data': 'CIa2yQEIo7bJAQipncoBCKijygEIkqHLAQiFoM0BCJyrzQEI8KvNAQj4q80BCIqszQEIq6zNAQ==',
+    })
+    
+    return enhanced_headers
+
+def simulate_human_behavior():
+    """Simulate human-like behavior with random delays and patterns"""
+    # Random delay between 1-5 seconds
+    delay = random.uniform(1, 5)
+    time.sleep(delay)
+    
+    # Sometimes add extra delay (20% chance)
+    if random.random() < 0.2:
+        extra_delay = random.uniform(2, 8)
+        time.sleep(extra_delay)
+    
+    # Return a random "thinking time" for the next request
+    return random.uniform(0.5, 3.0)
+
+def get_yt_dlp_options_with_advanced_bot_avoidance():
+    """Get yt-dlp options with the most advanced bot avoidance techniques"""
+    user_agent = get_random_user_agent()
+    headers = get_enhanced_headers_for_user_agent(user_agent)
+    
+    # Simulate human behavior
+    simulate_human_behavior()
+    
+    return {
+        'user_agent': user_agent,
+        'http_headers': headers,
+        'nocheckcertificate': True,
+        'ignoreerrors': False,
+        'retries': 15,  # More aggressive retries
+        'fragment_retries': 15,
+        'sleep_interval': 5,  # Longer delays
+        'max_sleep_interval': 15,
+        'sleep_interval_requests': 3,
+        'socket_timeout': 45,  # Longer timeout
+        'extractor_retries': 8,
+        'http_chunk_size': 5242880,  # Smaller chunks (5MB)
+        'buffersize': 1024,  # Smaller buffer
+        'prefer_ffmpeg': True,
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }],
+        # Additional bot avoidance
+        'no_color': True,  # Less suspicious output
+        'quiet': False,
+        'verbose': False,  # Less verbose to avoid detection
+        'no_warnings': True,
+        'extract_flat': False,
+        'force_generic_extractor': False,
+        'allow_unplayable_formats': False,
+        'ignore_no_formats_error': False,
+        'extractor_args': {
+            'youtube': {
+                'skip': ['dash', 'live_chat'],
+                'player_client': ['android', 'web'],
+                'player_skip': ['webpage', 'configs'],
+            }
+        }
+    }
 
 def convert_mp4_to_mov(input_file):
     """Convert MP4 file to MOV format using FFmpeg"""
@@ -138,12 +262,69 @@ def test_bot_avoidance():
     """Test route to check bot avoidance techniques"""
     user_agent = get_random_user_agent()
     headers = get_headers_for_user_agent(user_agent)
+    enhanced_headers = get_enhanced_headers_for_user_agent(user_agent)
     
     return jsonify({
         'status': 'ok',
         'message': 'Bot avoidance test',
         'user_agent': user_agent,
-        'headers': headers,
+        'basic_headers': headers,
+        'enhanced_headers': enhanced_headers,
+        'timestamp': '2024-01-18'
+    })
+
+@app.route('/test_youtube_access')
+def test_youtube_access():
+    """Test different YouTube access methods"""
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
+    
+    results = []
+    
+    # Test 1: Basic approach
+    try:
+        basic_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+        }
+        with yt_dlp.YoutubeDL(basic_opts) as ydl:
+            info = ydl.extract_info(test_url, download=False)
+            results.append({
+                'method': 'Basic',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0)
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Basic',
+            'success': False,
+            'error': str(e)
+        })
+    
+    # Test 2: Advanced bot avoidance
+    try:
+        advanced_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
+        advanced_opts['extract_flat'] = True
+        with yt_dlp.YoutubeDL(advanced_opts) as ydl:
+            info = ydl.extract_info(test_url, download=False)
+            results.append({
+                'method': 'Advanced Bot Avoidance',
+                'success': True,
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0)
+            })
+    except Exception as e:
+        results.append({
+            'method': 'Advanced Bot Avoidance',
+            'success': False,
+            'error': str(e)
+        })
+    
+    return jsonify({
+        'status': 'ok',
+        'message': 'YouTube access test results',
+        'results': results,
         'timestamp': '2024-01-18'
     })
 
@@ -163,24 +344,13 @@ def get_video_info():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Configure yt-dlp options for info extraction with bot avoidance
-        user_agent = get_random_user_agent()
-        headers = get_headers_for_user_agent(user_agent)
-        
-        ydl_opts = {
+        # Use advanced bot avoidance techniques
+        ydl_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
+        ydl_opts.update({
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            # Bot avoidance for info extraction
-            'user_agent': user_agent,
-            'http_headers': headers,
-            'nocheckcertificate': True,
-            'ignoreerrors': False,
-            'retries': 5,
-            'fragment_retries': 5,
-            'sleep_interval': 2,
-            'max_sleep_interval': 8,
-        }
+        })
         
         # Retry mechanism with exponential backoff for bot detection
         max_retries = 3
@@ -198,16 +368,60 @@ def get_video_info():
                     if attempt < max_retries - 1:
                         print(f"[Bot Detection] Waiting {retry_delay} seconds before retry...")
                         time.sleep(retry_delay)
-                        # Rotate user agent for next attempt
-                        user_agent = get_random_user_agent()
-                        headers = get_headers_for_user_agent(user_agent)
-                        ydl_opts['user_agent'] = user_agent
-                        ydl_opts['http_headers'] = headers
+                        # Try different approach for next attempt
+                        if attempt == 1:
+                            # Second attempt: try mobile user agent
+                            ydl_opts['user_agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1'
+                            ydl_opts['http_headers'] = get_enhanced_headers_for_user_agent(ydl_opts['user_agent'])
+                        elif attempt == 2:
+                            # Third attempt: try Firefox with different approach
+                            ydl_opts['user_agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
+                            ydl_opts['http_headers'] = get_enhanced_headers_for_user_agent(ydl_opts['user_agent'])
+                            # Add different extractor args
+                            ydl_opts['extractor_args'] = {
+                                'youtube': {
+                                    'skip': ['dash'],
+                                    'player_client': ['web'],
+                                    'player_skip': ['webpage'],
+                                }
+                            }
+                        
                         retry_delay *= 2  # Exponential backoff
                         continue
                     else:
-                        print(f"[Bot Detection] All retry attempts failed")
-                        return jsonify({'error': 'YouTube is blocking automated access. Please try again later or use a different video.'}), 429
+                        print(f"[Bot Detection] All retry attempts failed, trying fallback method...")
+                        # Try one last time with minimal options
+                        try:
+                            fallback_opts = {
+                                'format': 'best[ext=mp4]/best',
+                                'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_fallback.mp4'),
+                                'quiet': True,
+                                'no_warnings': True,
+                                'user_agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                                }
+                            }
+                            
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                                info = ydl.extract_info(url, download=False)
+                                return jsonify({
+                                    'title': info.get('title', 'Unknown Title'),
+                                    'duration': info.get('duration', 0),
+                                    'thumbnail': info.get('thumbnail', ''),
+                                    'formats': [{
+                                        'format_id': 'best[ext=mp4]/best',
+                                        'height': 720,
+                                        'ext': 'mp4',
+                                        'format_note': 'Fallback format (best available)',
+                                    }],
+                                    'video_id': extract_video_id(url),
+                                    'warning': 'Using fallback method due to bot detection'
+                                })
+                        except Exception as fallback_error:
+                            print(f"[Fallback] Also failed: {str(fallback_error)}")
+                            return jsonify({'error': 'YouTube is blocking all access methods. Please try again later or use a different video.'}), 429
                 else:
                     # Non-bot related error, don't retry
                     raise e
@@ -316,46 +530,19 @@ def download_video():
         if not is_valid_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
-        # Configure yt-dlp options for download with advanced bot avoidance
-        user_agent = get_random_user_agent()
-        headers = get_headers_for_user_agent(user_agent)
-        
-        ydl_opts = {
+        # Use advanced bot avoidance techniques for download
+        ydl_opts = get_yt_dlp_options_with_advanced_bot_avoidance()
+        ydl_opts.update({
             'format': f'{format_id}+bestaudio/best',  # Use selected format + best audio, more reliable
             'outtmpl': os.path.join(UPLOAD_FOLDER, '%(title)s_%(format_id)s.mp4'),  # Output as MP4
             'quiet': False,  # Show more output for debugging
             'no_warnings': False,  # Show warnings
+            'verbose': True,  # Add verbose output for debugging
             'merge_output_format': 'mp4',  # Force MP4 output
             'skip': ['storyboard', 'image'],
             'extractaudio': False,
             'audioformat': None,
-            'nocheckcertificate': True,
-            'ignoreerrors': False,
-            'verbose': True,  # Add verbose output for debugging
-            
-            # Advanced bot avoidance techniques
-            'user_agent': user_agent,
-            'http_headers': headers,
-            
-            # Enhanced retry and delay settings
-            'retries': 10,  # More retries for bot detection
-            'fragment_retries': 10,  # More fragment retries
-            'http_chunk_size': 10485760,  # 10MB chunks
-            'sleep_interval': 3,  # Longer sleep between requests
-            'max_sleep_interval': 10,  # Maximum sleep interval
-            'sleep_interval_requests': 2,  # Sleep between requests
-            
-            # Additional bot avoidance
-            'socket_timeout': 30,  # Longer socket timeout
-            'extractor_retries': 5,  # Retry extractor failures
-            
-            # Better format handling
-            'prefer_ffmpeg': True,  # Use FFmpeg for better merging
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',  # Ensure proper MP4 output
-            }],
-        }
+        })
         
         print(f"[Download] Using format_id: {format_id}")
         print(f"[Download] Full format string: {format_id}+bestaudio/best")
