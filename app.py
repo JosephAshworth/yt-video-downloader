@@ -82,6 +82,137 @@ def convert_mp4_to_mov(input_file):
 def index():
     return render_template('index.html')
 
+@app.route('/upload_cookies', methods=['POST'])
+def upload_cookies():
+    """Upload cookies file for YouTube authentication"""
+    try:
+        if 'cookies_file' not in request.files:
+            return jsonify({'error': 'No cookies file provided'}), 400
+        
+        cookies_file = request.files['cookies_file']
+        if cookies_file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if cookies_file:
+            # Save cookies file to a secure location
+            cookies_path = os.path.join(UPLOAD_FOLDER, 'youtube_cookies.txt')
+            cookies_file.save(cookies_path)
+            
+            # Test if cookies are valid by trying to access YouTube
+            test_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'cookiefile': cookies_path,
+                'extract_flat': True,
+            }
+            
+            try:
+                with yt_dlp.YoutubeDL(test_opts) as ydl:
+                    # Test with a simple video
+                    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                    info = ydl.extract_info(test_url, download=False)
+                    
+                    if info and info.get('title'):
+                        return jsonify({
+                            'success': True,
+                            'message': 'Cookies uploaded and validated successfully',
+                            'cookies_path': cookies_path,
+                            'test_result': 'Authentication successful'
+                        })
+                    else:
+                        return jsonify({'error': 'Cookies appear to be invalid or expired'}), 400
+                        
+            except Exception as e:
+                return jsonify({'error': f'Failed to validate cookies: {str(e)}'}), 400
+                
+    except Exception as e:
+        return jsonify({'error': f'Error uploading cookies: {str(e)}'}), 500
+
+@app.route('/set_credentials', methods=['POST'])
+def set_credentials():
+    """Set YouTube username and password for authentication"""
+    try:
+        data = request.get_json()
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            return jsonify({'error': 'Username and password are required'}), 400
+        
+        # Store credentials securely (in production, use environment variables)
+        credentials_path = os.path.join(UPLOAD_FOLDER, 'youtube_credentials.txt')
+        with open(credentials_path, 'w') as f:
+            f.write(f"username={username}\npassword={password}\n")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Credentials set successfully',
+            'credentials_path': credentials_path
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error setting credentials: {str(e)}'}), 500
+
+@app.route('/clear_auth', methods=['POST'])
+def clear_auth():
+    """Clear stored authentication data"""
+    try:
+        cookies_path = os.path.join(UPLOAD_FOLDER, 'youtube_cookies.txt')
+        credentials_path = os.path.join(UPLOAD_FOLDER, 'youtube_credentials.txt')
+        
+        if os.path.exists(cookies_path):
+            os.remove(cookies_path)
+        if os.path.exists(credentials_path):
+            os.remove(credentials_path)
+            
+        return jsonify({
+            'success': True,
+            'message': 'Authentication data cleared successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error clearing auth: {str(e)}'}), 500
+
+@app.route('/auth_status')
+def auth_status():
+    """Check current authentication status"""
+    try:
+        cookies_path = os.path.join(UPLOAD_FOLDER, 'youtube_cookies.txt')
+        credentials_path = os.path.join(UPLOAD_FOLDER, 'youtube_credentials.txt')
+        
+        cookies_exist = os.path.exists(cookies_path)
+        credentials_exist = os.path.exists(credentials_path)
+        
+        status = {
+            'cookies_configured': cookies_exist,
+            'credentials_configured': credentials_exist,
+            'authenticated': cookies_exist or credentials_exist,
+            'instructions': {
+                'cookies_method': 'Upload a cookies.txt file from your browser extension (like "Get cookies.txt" for Chrome)',
+                'credentials_method': 'Provide your YouTube username and password directly',
+                'why_needed': 'YouTube requires authentication to prevent bot detection and access restricted content'
+            }
+        }
+        
+        if cookies_exist:
+            status['cookies_info'] = {
+                'path': cookies_path,
+                'size': os.path.getsize(cookies_path),
+                'modified': os.path.getmtime(cookies_path)
+            }
+        
+        if credentials_exist:
+            status['credentials_info'] = {
+                'path': credentials_path,
+                'size': os.path.getsize(credentials_path),
+                'modified': os.path.getmtime(credentials_path)
+            }
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        return jsonify({'error': f'Error checking auth status: {str(e)}'}), 500
+
 @app.route('/test')
 def test():
     """Simple test route to check if the app is working"""
@@ -284,6 +415,23 @@ def get_video_info():
             'extract_flat': False,
             'verbose': True,  # Added verbose output
         }
+        
+        # Check for stored authentication and use it
+        cookies_path = os.path.join(UPLOAD_FOLDER, 'youtube_cookies.txt')
+        credentials_path = os.path.join(UPLOAD_FOLDER, 'youtube_credentials.txt')
+        
+        if os.path.exists(cookies_path):
+            print(f"[DEBUG] Using stored cookies for authentication: {cookies_path}")
+            ydl_opts['cookiefile'] = cookies_path
+        elif os.path.exists(credentials_path):
+            print(f"[DEBUG] Using stored credentials for authentication: {credentials_path}")
+            # Read credentials
+            with open(credentials_path, 'r') as f:
+                creds = dict(line.strip().split('=', 1) for line in f if '=' in line)
+                if 'username' in creds and 'password' in creds:
+                    ydl_opts['username'] = creds['username']
+                    ydl_opts['password'] = creds['password']
+                    print(f"[DEBUG] Using username: {creds['username']}")
         
         # Add deployment-specific options
         if IS_PRODUCTION or IS_RENDER or IS_HEROKU:
@@ -609,6 +757,23 @@ def download_video():
                 'preferedformat': 'mp4',  # Ensure proper MP4 output
             }],
         }
+        
+        # Check for stored authentication and use it
+        cookies_path = os.path.join(UPLOAD_FOLDER, 'youtube_cookies.txt')
+        credentials_path = os.path.join(UPLOAD_FOLDER, 'youtube_credentials.txt')
+        
+        if os.path.exists(cookies_path):
+            print(f"[Download] Using stored cookies for authentication: {cookies_path}")
+            ydl_opts['cookiefile'] = cookies_path
+        elif os.path.exists(credentials_path):
+            print(f"[Download] Using stored credentials for authentication: {credentials_path}")
+            # Read credentials
+            with open(credentials_path, 'r') as f:
+                creds = dict(line.strip().split('=', 1) for line in f if '=' in line)
+                if 'username' in creds and 'password' in creds:
+                    ydl_opts['username'] = creds['username']
+                    ydl_opts['password'] = creds['password']
+                    print(f"[Download] Using username: {creds['username']}")
         
         print(f"[Download] Using format_id: {format_id}")
         print(f"[Download] Full format string: {format_id}+bestaudio/best")

@@ -19,6 +19,67 @@
         </header>
 
         <main class="main-content">
+            <!-- Authentication Section -->
+            <div class="auth-section">
+                <h3><i class="fas fa-key"></i> YouTube Authentication</h3>
+                <p class="auth-description">Authenticate with your YouTube account to avoid bot detection and access restricted content.</p>
+                
+                <div class="auth-methods">
+                    <div class="auth-method">
+                        <h4><i class="fas fa-cookie-bite"></i> Method 1: Upload Cookies</h4>
+                        <p>Export cookies from your browser and upload them here.</p>
+                        <div class="cookie-upload">
+                            <input type="file" id="cookiesFile" accept=".txt" class="file-input">
+                            <button id="uploadCookiesBtn" class="upload-btn">
+                                <i class="fas fa-upload"></i>
+                                Upload Cookies
+                            </button>
+                        </div>
+                        <div class="auth-status" id="cookiesStatus"></div>
+                    </div>
+                    
+                    <div class="auth-method">
+                        <h4><i class="fas fa-user"></i> Method 2: Username & Password</h4>
+                        <p>Enter your YouTube credentials directly.</p>
+                        <div class="credentials-input">
+                            <input type="text" id="username" placeholder="YouTube Username/Email" class="cred-input">
+                            <input type="password" id="password" placeholder="YouTube Password" class="cred-input">
+                            <button id="setCredentialsBtn" class="set-cred-btn">
+                                <i class="fas fa-save"></i>
+                                Set Credentials
+                            </button>
+                        </div>
+                        <div class="auth-status" id="credentialsStatus"></div>
+                    </div>
+                </div>
+                
+                <div class="auth-actions">
+                    <button id="checkAuthBtn" class="check-auth-btn">
+                        <i class="fas fa-info-circle"></i>
+                        Check Status
+                    </button>
+                    <button id="clearAuthBtn" class="clear-auth-btn">
+                        <i class="fas fa-trash"></i>
+                        Clear Auth
+                    </button>
+                </div>
+                
+                <div class="auth-help">
+                    <details>
+                        <summary><i class="fas fa-question-circle"></i> How to get cookies?</summary>
+                        <div class="help-content">
+                            <ol>
+                                <li>Install "Get cookies.txt" extension for Chrome/Firefox</li>
+                                <li>Go to YouTube and make sure you're logged in</li>
+                                <li>Click the extension icon and export cookies</li>
+                                <li>Upload the downloaded .txt file here</li>
+                            </ol>
+                            <p><strong>Note:</strong> Cookies expire after some time, so you may need to re-upload them periodically.</p>
+                        </div>
+                    </details>
+                </div>
+            </div>
+
             <div class="input-section">
                 <div class="url-input-container">
                     <input type="text" id="videoUrl" placeholder="Enter YouTube video URL here..." class="url-input">
