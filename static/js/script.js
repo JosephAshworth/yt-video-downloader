@@ -52,7 +52,7 @@ async function analyzeVideo() {
     try {
         // Try alternative method first (no yt-dlp)
         console.log('Trying alternative video analysis...');
-        const response = await fetch('/get_video_info_alternative', {
+        let response = await fetch('/get_video_info_alternative', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -60,7 +60,32 @@ async function analyzeVideo() {
             body: JSON.stringify({ url: url })
         });
         
-        console.log('Response status:', response.status); // Debug log
+        console.log('Alternative response status:', response.status); // Debug log
+        
+        // If alternative fails, try the original route
+        if (!response.ok) {
+            console.log('Alternative route failed, trying original route...');
+            response = await fetch('/get_video_info', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: url })
+            });
+            console.log('Original response status:', response.status); // Debug log
+        }
+        
+        console.log('Final response status:', response.status); // Debug log
+        console.log('Response headers:', response.headers); // Debug log
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            // Get the raw text to see what we're actually getting
+            const rawText = await response.text();
+            console.error('Non-JSON response received:', rawText);
+            throw new Error(`Server returned ${contentType || 'unknown content type'}. Expected JSON.`);
+        }
         
         const data = await response.json();
         console.log('Response data:', data); // Debug log
@@ -240,6 +265,18 @@ async function downloadVideo() {
             })
         });
         
+        console.log('[Download] Response status:', response.status); // Debug log
+        console.log('[Download] Response headers:', response.headers); // Debug log
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            // Get the raw text to see what we're actually getting
+            const rawText = await response.text();
+            console.error('[Download] Non-JSON response received:', rawText);
+            throw new Error(`Server returned ${contentType || 'unknown content type'}. Expected JSON.`);
+        }
+        
         const data = await response.json();
         
         if (!response.ok) {
@@ -250,6 +287,7 @@ async function downloadVideo() {
         showDownloadComplete(data);
         
     } catch (error) {
+        console.error('[Download] Error:', error); // Debug log
         showError(error.message);
     }
 }
