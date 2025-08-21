@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Video Downloader</title>
+    <title>Direct YouTube Download (No Auth)</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -13,38 +13,22 @@
         <header class="header">
             <div class="logo">
                 <i class="fab fa-youtube"></i>
-                <h1>YouTube Downloader</h1>
+                <h1>Direct YouTube Download</h1>
             </div>
-            <div class="header-right">
-                <div class="user-info">
-                    <span id="username"></span>
-                    <div class="user-menu">
-                        <a href="{{ url_for('upload_cookies') }}" class="menu-item">
-                            <i class="fas fa-cookie-bite"></i>
-                            Upload Cookies
-                        </a>
-                        <a href="{{ url_for('logout') }}" class="menu-item">
-                            <i class="fas fa-sign-out-alt"></i>
-                            Logout
-                        </a>
-                    </div>
-                </div>
-                <div class="header-links">
-                    <a href="{{ url_for('direct_download') }}" class="direct-link">
-                        <i class="fas fa-unlock"></i>
-                        Try Direct Method
-                    </a>
-                </div>
-            </div>
-            <p class="subtitle">Download YouTube videos easily and quickly</p>
+            <p class="subtitle">No authentication required - Direct stream extraction</p>
         </header>
 
         <main class="main-content">
-            <div class="cookie-status" id="cookieStatus">
-                <div class="status-indicator">
-                    <i class="fas fa-cookie-bite"></i>
-                    <span id="cookieStatusText">Checking cookie status...</span>
-                </div>
+            <div class="method-info">
+                <h3>🔓 Direct Method (No Login Required)</h3>
+                <p>This method extracts video streams directly from YouTube's player response without requiring:</p>
+                <ul>
+                    <li>❌ User authentication</li>
+                    <li>❌ YouTube cookies</li>
+                    <li>❌ yt-dlp library</li>
+                    <li>❌ Bot detection bypass</li>
+                </ul>
+                <p><strong>How it works:</strong> Parses YouTube's embedded player data to find direct video URLs.</p>
             </div>
 
             <div class="input-section">
@@ -128,19 +112,45 @@
                         </button>
                         <button id="newDownloadBtn" class="new-download-btn">
                             <i class="fas fa-plus"></i>
-                            Download Another
+                            New Download
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="method-comparison">
+                <h3>Method Comparison</h3>
+                <div class="comparison-grid">
+                    <div class="method-card">
+                        <h4>🔓 Direct Method (This Page)</h4>
+                        <ul>
+                            <li>✅ No login required</li>
+                            <li>✅ No cookies needed</li>
+                            <li>✅ No yt-dlp dependency</li>
+                            <li>⚠️ May not work for all videos</li>
+                            <li>⚠️ Limited format selection</li>
+                        </ul>
+                    </div>
+                    <div class="method-card">
+                        <h4>🔐 Authentication Method</h4>
+                        <ul>
+                            <li>✅ Most reliable</li>
+                            <li>✅ Full format selection</li>
+                            <li>✅ Works with all videos</li>
+                            <li>❌ Requires login</li>
+                            <li>❌ Needs YouTube cookies</li>
+                        </ul>
                     </div>
                 </div>
             </div>
         </main>
 
         <footer class="footer">
-            <p>&copy; 2024 YouTube Downloader. For educational purposes only.</p>
-            <p>Please respect YouTube's terms of service and copyright laws.</p>
+            <p><a href="{{ url_for('index') }}">← Back to Main Downloader</a></p>
+            <p>Direct method for quick downloads without authentication</p>
         </footer>
     </div>
 
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/direct_script.js') }}"></script>
 </body>
-</html> 
+</html>
